@@ -36,6 +36,7 @@ export default tseslint.config(
         { property: 'toFixed', message: 'No floats for money (ADR-4)' }],
       'no-restricted-syntax': ['error',
         { selector: "CallExpression[callee.name='Number']", message: 'No floats for money (ADR-4)' }],
+        '@typescript-eslint/no-unused-vars': ['error', { varsIgnorePattern: '^_' }],
     },
   },
 );

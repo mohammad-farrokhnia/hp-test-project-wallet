@@ -1,13 +1,19 @@
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import process from 'process';
+import { AppConfig } from './config/app-config';
+import { existsSync } from 'node:fs';
+
+if (existsSync('.env')) process.loadEnvFile('.env');
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { rawBody: true });
   app.enableShutdownHooks();
-  const port = parseInt(process.env.PORT ?? '3000', 10);
-  await app.listen(port);
-  Logger.log(`HTTP listening on :${port}`, 'Bootstrap');
+  const config = app.get(AppConfig);
+  await app.listen(config.http.port);
+  Logger.log(
+    `[${config.role}] HTTP listening on :${config.http.port}`,
+    'Bootstrap',
+  );
 }
 void bootstrap();
