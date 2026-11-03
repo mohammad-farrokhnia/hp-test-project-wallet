@@ -30,6 +30,12 @@ export default tseslint.config(
       '@typescript-eslint/no-floating-promises': 'warn',
       '@typescript-eslint/no-unsafe-argument': 'warn',
       "prettier/prettier": ["error", { endOfLine: "auto" }],
+      'no-restricted-globals': ['error', { name: 'parseFloat', message: 'No floats for money (ADR-4)' }],
+      'no-restricted-properties': ['error',
+        { object: 'Number', property: 'parseFloat', message: 'No floats for money (ADR-4)' },
+        { property: 'toFixed', message: 'No floats for money (ADR-4)' }],
+      'no-restricted-syntax': ['error',
+        { selector: "CallExpression[callee.name='Number']", message: 'No floats for money (ADR-4)' }],
     },
   },
 );

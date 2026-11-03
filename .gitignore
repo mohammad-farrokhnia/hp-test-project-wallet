@@ -52,3 +52,7 @@ playwright-report/
 # Optional: package manager caches
 .npm/
 .pnpm-store/
+
+# tools
+tools/probe/out/
+tools/probe2/out2/
