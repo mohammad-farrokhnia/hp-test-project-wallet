@@ -62,7 +62,6 @@ describeDb('database plumbing (real PostgreSQL)', () => {
   });
 
   afterAll(async () => {
-    // beforeAll may have failed to connect; don't hide that error behind a second one.
     if (!ds?.isInitialized) return;
     await ds.query('DROP TABLE IF EXISTS it_bigint_probe, it_lock_probe');
     await ds.destroy();
@@ -78,10 +77,10 @@ describeDb('database plumbing (real PostgreSQL)', () => {
       0n,
       1n,
       -1n,
-      9_007_199_254_740_992n, // 2^53: last integer a JS number holds exactly
-      9_007_199_254_740_993n, // 2^53 + 1: a JS number would round this
-      9_223_372_036_854_775_807n, // 2^63 - 1
-      -9_223_372_036_854_775_808n, // -2^63
+      9_007_199_254_740_992n,
+      9_007_199_254_740_993n,
+      9_223_372_036_854_775_807n,
+      -9_223_372_036_854_775_808n,
     ];
 
     it.each(edges)(
@@ -115,8 +114,6 @@ describeDb('database plumbing (real PostgreSQL)', () => {
 
     it('retries a forced deadlock and both transactions commit', async () => {
       const attempts = { a: 0, b: 0 };
-      // Each worker takes its first row, then waits until the other holds
-      // theirs: a guaranteed lock cycle on the first attempt only.
       const bothHoldOne = [new Deferred(), new Deferred()];
       const worker = (
         name: 'a' | 'b',

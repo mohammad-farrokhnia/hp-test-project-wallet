@@ -34,7 +34,6 @@ function setup() {
   return { runner, queries, isolation };
 }
 
-/** An fn that throws `err` the first `times` calls, then returns 'done'. */
 function failing(err: Error, times: number) {
   let calls = 0;
   const fn = jest.fn(() => {

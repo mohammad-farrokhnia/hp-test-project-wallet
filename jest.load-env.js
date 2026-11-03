@@ -1,14 +1,3 @@
-// Loader for the test environment, used by jest.env.js (setup file, runs in every test
-// sandbox) and jest.global-setup.js (runs once, in the real process). It is a separate
-// module because Jest calls any function a setup file exports.
-//
-//   .env.test  (git-ignored, see README) overrides anything already set, even an exported shell DATABASE_URL,
-//              so a dev database can't leak into a test run.
-//   .env       only fills variables that are still missing.
-//
-// Jest gives each test file a sandboxed copy of process.env, so process.loadEnvFile()
-// (which fills the real one) would have no effect there; parse and assign instead.
-// Both files are optional: the compose test service passes its variables in directly.
 const { readFileSync } = require('node:fs');
 const { parseEnv } = require('node:util');
 
@@ -33,6 +22,12 @@ function assertTestDatabase(env) {
   }
 }
 
+/**
+ * @function loadTestEnv
+ * @description Loads `.env.test` (overriding) then `.env` (filling gaps) into `env`, and rejects a non-`_test` database.
+ * @param env - the environment object to populate
+ * @returns the same environment object
+ */
 function loadTestEnv(env) {
   Object.assign(env, read('.env.test'));
   for (const [key, value] of Object.entries(read('.env'))) {
