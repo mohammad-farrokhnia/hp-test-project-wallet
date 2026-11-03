@@ -295,5 +295,3 @@ src/modules/withdrawal/
   repositories/                 withdrawals.repository.ts · payout-attempts.repository.ts · daily-limit.repository.ts
   withdrawal.due-work.ts        scheduler source
 ```
-
-Every business module follows the same shape, so a reader who knows one knows all of them.
