@@ -112,6 +112,7 @@ docker compose --profile test run --rm test
 
 - **No floats for money.** Lint rejects `parseFloat`, `Number(...)` and `toFixed`. Use `bigint`.
 - **Amounts are `Money`** (`src/common/money`): `bigint` minor units, rial for IRR and 10⁻⁶ for USDT. Parse client input with `parseApiAmount('IRT' | 'USDT', string)` (whole toman, ×10 to rial; USDT up to 6 decimals), format with `formatApiAmount`, and talk to providers with `toProviderAmount` / `parseProviderAmount`. Strings only: a JS number is rejected.
+- **Errors are `AppError(code)`** from the catalog in `src/common/errors`; the status comes from the catalog and every response is `{code, message}`. Unexpected errors become `INTERNAL_ERROR` with no detail and are logged with the `X-Request-Id`. Logs are JSON (`LOG_LEVEL`), never include request headers, and `GET /health` is not access-logged.
 - **Schema changes are migrations only.** `synchronize` stays off.
 - **Raw `manager.query()` returns BIGINT as strings.** Wrap with `BigInt(...)`; entities use `bigintTransformer`.
 - **A transaction function may be re-run** after a deadlock, so it must not call providers or publish messages. Those go through the outbox.

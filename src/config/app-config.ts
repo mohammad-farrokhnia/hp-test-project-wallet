@@ -3,6 +3,7 @@ import { Env, envSchema } from './env.schema';
 
 export class AppConfig {
   readonly role: Env['APP_ROLE'];
+  readonly logLevel: Env['LOG_LEVEL'];
   readonly http: { port: number; publicBaseUrl: string; timeoutMs: number };
   readonly db: {
     url: string;
@@ -24,6 +25,7 @@ export class AppConfig {
 
   constructor(e: Env) {
     this.role = e.APP_ROLE;
+    this.logLevel = e.LOG_LEVEL;
     this.http = {
       port: e.PORT,
       publicBaseUrl: e.PUBLIC_BASE_URL.replace(/\/$/, ''),
