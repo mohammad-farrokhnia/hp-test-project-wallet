@@ -1,0 +1,148 @@
+# Tests:  docker compose --profile test run --rm test
+# One-time prerequisite: docker load -i t103-simulator.tar.gz   (image hamtapay/t103-simulator:1.0)
+#
+# Config comes from .env (optional, see .env.example): compose reads it for ${VAR}
+# interpolation, and env_file passes the app's own settings (limits, timeouts, expiry)
+# through, so their defaults stay in src/config/env.schema.ts. No .env = working defaults.
+# DATABASE_URL, RABBITMQ_URL and the *_BASE_URL values are NOT read from .env: there they
+# point at localhost (app on the host); in the compose network they name containers.
+name: wallet
+
+x-app-image: &app-image
+  build: { context: ., target: runtime }
+  image: wallet-app:local
+  pull_policy: build # local-only tag: never try Docker Hub
+  env_file:
+    - path: .env
+      required: false
+
+x-app-env: &app-env
+  PORT: ${PORT:-3000}
+  DATABASE_URL: postgres://${POSTGRES_USER:-wallet}:${POSTGRES_PASSWORD:-wallet}@postgres:5432/${POSTGRES_DB:-wallet}
+  RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:-guest}@rabbitmq:5672
+  # One simulator serves both the PSP and the payout service.
+  PSP_BASE_URL: http://simulator:8080
+  PAYOUT_BASE_URL: http://simulator:8080
+  PUBLIC_BASE_URL: http://app:${PORT:-3000}
+  PAYOUT_WEBHOOK_SECRET: ${PAYOUT_WEBHOOK_SECRET:-hamtapay-sim-secret} # the simulator signs with the same value
+
+x-app-health: &app-health
+  test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:$${PORT}/health"]
+  interval: 5s
+  timeout: 3s
+  retries: 12
+  start_period: 10s
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-wallet}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wallet}
+      POSTGRES_DB: ${POSTGRES_DB:-wallet}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    ports: ["127.0.0.1:${POSTGRES_PORT:-0}:5432"] # 0 = any free port: docker compose port postgres 5432
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+    volumes: [rabbitmq:/var/lib/rabbitmq]
+    ports: ["127.0.0.1:${RABBITMQ_UI_PORT:-0}:15672"] # docker compose port rabbitmq 15672
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 15s
+
+  simulator:
+    image: hamtapay/t103-simulator:1.0
+    pull_policy: never
+    environment:
+      SIM_CHAOS: ${SIM_CHAOS:-default} # off | default | hostile
+      SIM_TIME_SCALE: ${SIM_TIME_SCALE:-1}
+      SIM_PUBLIC_URL: http://simulator:8080
+      PAYOUT_WEBHOOK_URL: http://app:${PORT:-3000}/webhooks/payout
+      WEBHOOK_SECRET: ${PAYOUT_WEBHOOK_SECRET:-hamtapay-sim-secret}
+    ports: ["127.0.0.1:${SIMULATOR_PORT:-0}:8080"] # docker compose port simulator 8080
+    healthcheck:
+      # no known health route: a TCP connect proves the server is listening
+      test: ["CMD", "node", "-e", "require('net').connect(8080,'127.0.0.1').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # One-shot: applies migrations, then exits 0. api and worker wait for it.
+  migrate:
+    <<: *app-image
+    command: ["node", "dist/migrate"]
+    environment: *app-env
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: "no"
+
+  api:
+    <<: *app-image
+    deploy: { replicas: 2 }
+    environment: { <<: *app-env, APP_ROLE: api }
+    healthcheck: *app-health
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      simulator: { condition: service_healthy }
+
+  worker:
+    <<: *app-image
+    deploy: { replicas: 2 }
+    environment: { <<: *app-env, APP_ROLE: worker }
+    healthcheck: *app-health
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      simulator: { condition: service_healthy }
+
+  # Public entry point `app:$PORT`, round-robin across the api replicas.
+  # nginx renders templates/*.template with envsubst at start; only $PORT is substituted.
+  app:
+    image: nginx:1.27-alpine
+    environment:
+      PORT: ${PORT:-3000}
+      NGINX_ENVSUBST_FILTER: ^PORT$$
+    volumes: ["./docker/nginx.conf.template:/etc/nginx/templates/default.conf.template:ro"]
+    ports: ["${APP_PORT:-3000}:${PORT:-3000}"]
+    depends_on:
+      api: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:$${PORT}/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  test:
+    profiles: [test]
+    build: { context: ., target: test }
+    image: wallet-test:local
+    pull_policy: build
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      <<: *app-env
+      CI: "true"
+    depends_on:
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      simulator: { condition: service_healthy }
+
+volumes:
+  pgdata:
+  rabbitmq:
