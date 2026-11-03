@@ -2,13 +2,13 @@ import { Logger } from '@nestjs/common';
 import { Logger as PinoLogger } from 'nestjs-pino';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { AppConfig } from './config/app-config';
+import { AppConfig, loadConfig } from './config/app-config';
 import { existsSync } from 'node:fs';
 
 if (existsSync('.env')) process.loadEnvFile('.env');
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create(AppModule.forRole(loadConfig().role), {
     rawBody: true,
     bufferLogs: true,
   });

@@ -11,7 +11,7 @@ const micro = (def: string) =>
 const int = (def: number) => z.coerce.number().int().positive().default(def);
 
 export const envSchema = z.object({
-  APP_ROLE: z.enum(['api', 'worker']).default('api'),
+  APP_ROLE: z.enum(['api', 'worker', 'all']).default('api'),
   PORT: int(3000),
   LOG_LEVEL: z
     .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])

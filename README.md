@@ -15,10 +15,13 @@ in progrees ...
 
 ## Architecture in brief
 
-One codebase and one image, started in one of two roles by `APP_ROLE`:
+One codebase and one image, started in one of three roles by `APP_ROLE`:
 
 - **`api`**: HTTP. Two replicas behind nginx, reachable as `app:3000`.
-- **`worker`**: consumers, outbox relay, schedulers. Two replicas.
+- **`worker`**: consumers, outbox relay, schedulers. Two replicas. Its only controller is the probe pair below.
+- **`all`**: both roles in one process, for local development.
+
+Every role serves `GET /health` (liveness) and `GET /ready` (readiness: `200` when the database answers, `503 NOT_READY` when it does not).
 
 PostgreSQL is the only source of truth; RabbitMQ only delivers. Every money change is one `READ COMMITTED` transaction that locks rows in a fixed order.
 

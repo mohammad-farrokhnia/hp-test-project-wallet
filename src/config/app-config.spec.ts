@@ -17,6 +17,16 @@ describe('loadConfig', () => {
     ).toBe('k');
   });
 
+  it.each(['api', 'worker', 'all'] as const)('accepts APP_ROLE=%s', (role) => {
+    expect(loadConfig({ ...TEST_ENV, APP_ROLE: role }).role).toBe(role);
+  });
+
+  it('rejects an unknown APP_ROLE', () => {
+    expect(() => loadConfig({ ...TEST_ENV, APP_ROLE: 'admin' })).toThrow(
+      /APP_ROLE/,
+    );
+  });
+
   it('fails fast on a missing variable', () => {
     const { DATABASE_URL: _omit, ...rest } = TEST_ENV;
     expect(() => loadConfig(rest)).toThrow(/DATABASE_URL/);

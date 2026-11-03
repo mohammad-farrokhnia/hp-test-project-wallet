@@ -19,9 +19,10 @@ import {
 } from 'class-validator';
 import { LoggerModule } from 'nestjs-pino';
 import request from 'supertest';
-import { QueryFailedError } from 'typeorm';
+import { DataSource, QueryFailedError } from 'typeorm';
 import { App } from 'supertest/types';
 import { AppModule } from '../../app.module';
+import { fakeDataSource } from '../../database/testing';
 import { buildPinoHttpOptions, LoggingModule } from '../logging';
 import { MoneyError } from '../money';
 import { AppError } from './app-error';
@@ -111,9 +112,11 @@ describe('error contract over HTTP', () => {
 
   beforeAll(async () => {
     const ref = await Test.createTestingModule({
-      imports: [AppModule],
+      imports: [AppModule.forRole('api')],
       controllers: [ProbeController],
     })
+      .overrideProvider(DataSource)
+      .useValue(fakeDataSource())
       .overrideModule(LoggingModule)
       .useModule(CapturingLoggingModule)
       .compile();

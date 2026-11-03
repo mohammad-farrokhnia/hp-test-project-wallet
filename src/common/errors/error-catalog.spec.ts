@@ -21,13 +21,14 @@ describe('error catalog', () => {
     ['SAME_USER', 422],
     ['INTERNAL_ERROR', 500],
     ['SERVICE_BUSY', 503],
+    ['NOT_READY', 503],
     ['PROVIDER_UNAVAILABLE', 503],
   ] as const)('%s maps to HTTP %s', (code, status) => {
     expect(ERROR_CATALOG[code].status).toBe(status);
   });
 
-  it('holds exactly the 17 documented codes', () => {
-    expect(codes).toHaveLength(17);
+  it('holds exactly the 18 documented codes', () => {
+    expect(codes).toHaveLength(18);
   });
 
   it.each(codes)('%s has a non-empty client message', (code) => {

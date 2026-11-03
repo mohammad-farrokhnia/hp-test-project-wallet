@@ -24,6 +24,7 @@ export const ERROR_CATALOG = {
   SAME_USER: { status: 422, message: 'Cannot transfer to the same user' },
   INTERNAL_ERROR: { status: 500, message: 'Internal server error' },
   SERVICE_BUSY: { status: 503, message: 'Service is busy, retry shortly' },
+  NOT_READY: { status: 503, message: 'Service is not ready' },
   PROVIDER_UNAVAILABLE: {
     status: 503,
     message: 'Provider unavailable, retry with the same key',

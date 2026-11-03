@@ -280,6 +280,7 @@ Adapter rules: one keep-alive HTTP agent per provider; 10 s timeout per call; ev
 | 422 | `SAME_USER` | bonus: transfer to self |
 | 500 | `INTERNAL_ERROR` | anything unexpected (logged with the request id, no details leaked) |
 | 503 | `SERVICE_BUSY` | lock timeout outside the idempotency claim |
+| 503 | `NOT_READY` | `/ready` while a dependency (database) is unreachable |
 | 503 | `PROVIDER_UNAVAILABLE` | PSP create failed ambiguously; retry with the same key |
 
 ## Folder layout of one module
