@@ -25,6 +25,7 @@ export const envSchema = z.object({
 
   HTTP_TIMEOUT_MS: int(5000),
   DB_LOCK_TIMEOUT_MS: int(3000),
+  DB_STATEMENT_TIMEOUT_MS: int(5000),
 
   DEPOSIT_MIN_TOMAN: toman('1000'),
   WITHDRAW_MIN_TOMAN: toman('100000'),

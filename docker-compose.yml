@@ -137,6 +137,7 @@ services:
         required: false
     environment:
       <<: *app-env
+      DATABASE_URL: postgres://${POSTGRES_USER:-wallet}:${POSTGRES_PASSWORD:-wallet}@postgres:5432/${POSTGRES_TEST_DB:-wallet_test}
       CI: "true"
     depends_on:
       postgres: { condition: service_healthy }

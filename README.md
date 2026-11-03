@@ -1,98 +1,116 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Wallet
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+A wallet service with a double-entry ledger: users hold IRT (stored as rial) and USDT balances, deposit through a payment provider (PSP) and withdraw through a payout provider. Money only moves inside PostgreSQL transactions, and the providers are treated as untrusted: a callback never changes a balance, only our own follow-up lookup does.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+**Stack:** 
+- NestJS 11 
+- TypeScript 
+- PostgreSQL 17 (TypeORM, explicit SQL on money paths) 
+- RabbitMQ (transactional outbox) 
+- Node 22.
 
-## Description
+## Status
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+in progrees ...
 
-## Project setup
+## Architecture in brief
 
-```bash
-$ npm install
-```
+One codebase and one image, started in one of two roles by `APP_ROLE`:
 
-## Compile and run the project
+- **`api`**: HTTP. Two replicas behind nginx, reachable as `app:3000`.
+- **`worker`**: consumers, outbox relay, schedulers. Two replicas.
 
-```bash
-# development
-$ npm run start
+PostgreSQL is the only source of truth; RabbitMQ only delivers. Every money change is one `READ COMMITTED` transaction that locks rows in a fixed order.
 
-# watch mode
-$ npm run start:dev
+Design documents live in [docs/](docs/):
 
-# production mode
-$ npm run start:prod
-```
+| File | Contents |
+| --- | --- |
+| [design.md](docs/design.md) | Architecture, ledger, request path |
+| [modules.md](docs/modules.md) | Module responsibilities and process roles |
+| [data-model.md](docs/data-model.md) | Every table, constraint and index |
+| [state-machines.md](docs/state-machines.md) | Deposit and withdrawal transitions |
+| [adr/](docs/adr/) | The 13 decision records |
 
-## Run tests
+## Quick start (Docker)
+
+Prerequisites: Docker with Compose v2.24+. The provider simulator image is not on a registry; load it once from the kickoff kit:
 
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+docker load -i t103-simulator.tar.gz        # provides hamtapay/t103-simulator:1.0
+docker compose up -d --build --wait         # postgres, rabbitmq, simulator, migrate, api x2, worker x2, nginx
+curl localhost:3000/health                  # {"status":"ok"}
 ```
 
-## Deployment
+Stop with `docker compose down` (add `-v` to also delete the database and queue data).
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+| Service | Role |
+| --- | --- |
+| `app` | nginx, the public entry point (`localhost:3000`), round-robin over `api` |
+| `api` ×2 / `worker` ×2 | the application image, one per `APP_ROLE` |
+| `migrate` | one-shot: applies pending migrations, then exits |
+| `postgres`, `rabbitmq` | data stores |
+| `simulator` | the PSP and payout provider simulator (`SIM_CHAOS`: `off`, `default`, `hostile`) |
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+Postgres, the RabbitMQ UI and the simulator are published on `127.0.0.1` only. Find a port with `docker compose port postgres 5432`, or pin it with `POSTGRES_PORT`, `RABBITMQ_UI_PORT` or `SIMULATOR_PORT` in `.env`.
+
+## Configuration
 
 ```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+cp .env.example .env
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+`.env` is optional for Docker (every value has a default) and required to run the app or tests on your machine. Compose reads it too, so credentials, ports and limits are set in one place. Every variable is validated at startup and the app refuses to start on a missing or malformed one (`src/config/env.schema.ts`).
 
-## Resources
+`DATABASE_URL`, `RABBITMQ_URL` and the `*_BASE_URL` values in `.env` point at `localhost` for running on your machine. Inside Docker, compose builds the container-network versions itself, so those lines are ignored there. If you change `POSTGRES_PORT`, change the port in `DATABASE_URL` to match.
 
-Check out a few resources that may come in handy when working with NestJS:
+## Running on your machine
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+```bash
+nvm use                                    # Node 22 (.nvmrc)
+npm install
+docker compose up -d --wait postgres rabbitmq simulator   # dependencies only
+npm run start:dev
+```
 
-## Support
+Other scripts: `npm run build`, `npm run lint` (applies fixes), `npm run format`.
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+## Running the tests
 
-## Stay in touch
+Unit tests need nothing. The database integration tests (`*.int.spec.ts`) run against a real PostgreSQL and use their **own database, `wallet_test`**, never your dev data. Create the test config once:
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+**1. Create `.env.test`** in the project root. It is git-ignored, like `.env`:
 
-## License
+```dotenv
+DATABASE_URL=postgres://wallet:wallet@localhost:5432/wallet_test
+RABBITMQ_URL=amqp://guest:guest@localhost:5672
+PSP_BASE_URL=http://localhost:8080
+PAYOUT_BASE_URL=http://localhost:8080
+PUBLIC_BASE_URL=http://localhost:3000
+PAYOUT_WEBHOOK_SECRET=hamtapay-sim-secret
+```
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+Use the same user, password and port as `POSTGRES_*` in your `.env`. The database name **must end in `_test`**: the run refuses to start otherwise, because the tests truncate and drop tables.
+
+**2. Start PostgreSQL and run:**
+
+```bash
+docker compose up -d --wait postgres
+npm test
+```
+
+`wallet_test` is created automatically on the first run. Values in `.env.test` win over your shell and `.env`, so an exported dev `DATABASE_URL` cannot leak into a test run.
+
+If PostgreSQL is not running, the unit tests still pass and the integration suite fails with `ECONNREFUSED`. If `.env.test` is missing, the run stops with an error pointing here.
+
+**Or run everything inside Docker**, with no local setup (uses `wallet_test` in the compose Postgres):
+
+```bash
+docker compose --profile test run --rm test
+```
+## Conventions
+
+- **No floats for money.** Lint rejects `parseFloat`, `Number(...)` and `toFixed`. Use `bigint`.
+- **Schema changes are migrations only.** `synchronize` stays off.
+- **Raw `manager.query()` returns BIGINT as strings.** Wrap with `BigInt(...)`; entities use `bigintTransformer`.
+- **A transaction function may be re-run** after a deadlock, so it must not call providers or publish messages. Those go through the outbox.

@@ -4,7 +4,11 @@ import { Env, envSchema } from './env.schema';
 export class AppConfig {
   readonly role: Env['APP_ROLE'];
   readonly http: { port: number; publicBaseUrl: string; timeoutMs: number };
-  readonly db: { url: string; lockTimeoutMs: number };
+  readonly db: {
+    url: string;
+    lockTimeoutMs: number;
+    statementTimeoutMs: number;
+  };
   readonly rabbit: { url: string };
   readonly psp: { baseUrl: string };
   readonly payout: { baseUrl: string; webhookSecret: string };
@@ -25,7 +29,11 @@ export class AppConfig {
       publicBaseUrl: e.PUBLIC_BASE_URL.replace(/\/$/, ''),
       timeoutMs: e.HTTP_TIMEOUT_MS,
     };
-    this.db = { url: e.DATABASE_URL, lockTimeoutMs: e.DB_LOCK_TIMEOUT_MS };
+    this.db = {
+      url: e.DATABASE_URL,
+      lockTimeoutMs: e.DB_LOCK_TIMEOUT_MS,
+      statementTimeoutMs: e.DB_STATEMENT_TIMEOUT_MS,
+    };
     this.rabbit = { url: e.RABBITMQ_URL };
     this.psp = { baseUrl: e.PSP_BASE_URL.replace(/\/$/, '') };
     this.payout = {

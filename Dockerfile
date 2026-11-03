@@ -25,6 +25,7 @@ RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev
 FROM deps AS test
 COPY tsconfig.json tsconfig.build.json nest-cli.json ./
 COPY src ./src
+COPY jest.env.js jest.load-env.js jest.global-setup.js ./
 CMD ["npm", "test"]
 
 # ---- runtime target (default) ----
