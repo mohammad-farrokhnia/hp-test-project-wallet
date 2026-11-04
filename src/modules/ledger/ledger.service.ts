@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { CurrencyCode } from '../../common/money';
+import { foldBalances } from './domain/balances';
 import { Tx } from '../../database/transaction-runner';
 import {
   JournalInput,
@@ -17,10 +18,13 @@ import { LedgerError } from './domain/ledger.error';
 import {
   CreditUserInput,
   FrozenBalance,
+  HistoryPage,
   PostResult,
   UserAccountIds,
+  WalletBalances,
 } from './ledger.types';
 import { AccountsRepository } from './repositories/accounts.repository';
+import { HistoryRepository } from './repositories/history.repository';
 import { JournalsRepository } from './repositories/journals.repository';
 import { LedgerChecksRepository } from './repositories/ledger-checks.repository';
 
@@ -34,6 +38,7 @@ export class LedgerService {
     private readonly accounts: AccountsRepository,
     private readonly journals: JournalsRepository,
     private readonly checks: LedgerChecksRepository,
+    private readonly history: HistoryRepository,
   ) {}
 
   /**
@@ -164,6 +169,47 @@ export class LedgerService {
       await this.accounts.setBalance(tx, p.account.id, p.balanceAfter);
     }
     return { journalId, alreadyBooked: false };
+  }
+
+  /**
+   * @function getBalances
+   * @description A user's balances in every currency. Reads only: no locks, and an unknown user gets zeros without any account being created (A3).
+   * @param tx - a read transaction
+   * @param userId - the wallet owner
+   * @returns balances per currency, in registry order
+   */
+  async getBalances(
+    tx: Tx,
+    userId: string,
+  ): Promise<Map<CurrencyCode, WalletBalances>> {
+    return foldBalances(await this.history.userBalances(tx, userId));
+  }
+
+  /**
+   * @function listHistory
+   * @description One page of a user's postings, newest first, by keyset on the posting id. Fetches one extra row to know whether another page follows.
+   * @param tx - a read transaction
+   * @param userId - the wallet owner
+   * @param page - `beforeId` from the previous page (omit for the first), and the page size
+   * @returns the entries and the `beforeId` of the next page, or `null`
+   */
+  async listHistory(
+    tx: Tx,
+    userId: string,
+    page: { beforeId?: bigint; limit: number },
+  ): Promise<HistoryPage> {
+    const rows = await this.history.page(
+      tx,
+      userId,
+      page.beforeId,
+      page.limit + 1,
+    );
+    const entries = rows.slice(0, page.limit);
+    const more = rows.length > page.limit;
+    return {
+      entries,
+      nextBeforeId: more ? entries[entries.length - 1].postingId : null,
+    };
   }
 
   /**

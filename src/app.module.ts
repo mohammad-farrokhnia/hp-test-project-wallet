@@ -13,6 +13,7 @@ import {
 } from './modules/idempotency';
 import { LedgerModule } from './modules/ledger';
 import { OperationsModule } from './modules/operations';
+import { WalletModule } from './modules/wallet';
 
 export type AppRole = Env['APP_ROLE'];
 
@@ -26,7 +27,12 @@ const SHARED_MODULES: Type[] = [
   HealthModule,
 ];
 
-const API_MODULES: Type[] = [ValidationModule, GuardsModule, OperationsModule];
+const API_MODULES: Type[] = [
+  ValidationModule,
+  GuardsModule,
+  OperationsModule,
+  WalletModule,
+];
 
 const WORKER_MODULES: Type[] = [IdempotencyCleanupModule];
 

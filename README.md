@@ -114,6 +114,14 @@ npm test
 
 If PostgreSQL is not running, the unit tests still pass and the integration suite fails with `ECONNREFUSED`. If `.env.test` is missing, the run stops with an error pointing here.
 
+**Performance check (about a minute, not part of `npm test`):**
+
+```bash
+npm run test:perf
+```
+
+It seeds a user with 1,000,000 postings inside a transaction that is rolled back, walks to page 1,000 of `GET /wallets/:userId/ledger` through real cursors, and fails if that page takes 50 ms or more, or if its plan sorts or scans instead of walking an index.
+
 **Or run everything inside Docker**, with no local setup (uses `wallet_test` in the compose Postgres):
 
 ```bash

@@ -28,6 +28,34 @@ export interface UserAccountIds {
   readonly debt: bigint;
 }
 
+/** One user's balances in one currency. `debt` is zero or negative, as stored. */
+export interface WalletBalances {
+  readonly available: Money;
+  readonly frozen: Money;
+  readonly debt: Money;
+}
+
+/** One posting on a user's account, with its journal: a line of wallet history. */
+export interface HistoryEntry {
+  readonly postingId: bigint;
+  readonly journalId: bigint;
+  readonly journalKind: JournalKind;
+  readonly bucket: 'AVAILABLE' | 'FROZEN' | 'DEBT';
+  /** Signed: negative when money left the bucket. */
+  readonly amount: Money;
+  readonly balanceAfter: Money;
+  readonly refType: string;
+  readonly refId: string;
+  readonly description: string | null;
+  readonly createdAt: Date;
+}
+
+/** A page of history, newest first. */
+export interface HistoryPage {
+  readonly entries: readonly HistoryEntry[];
+  readonly nextBeforeId: bigint | null;
+}
+
 /** A credit to a user from a system account (deposit, adjustment). */
 export interface CreditUserInput {
   readonly userId: string;

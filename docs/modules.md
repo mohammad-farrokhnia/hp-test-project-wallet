@@ -75,8 +75,8 @@ Nothing points back: the ledger knows nothing about withdrawals, and the schedul
 | `systemAccountId(tx, kind, currency)` | → account id | caller's | The seeded `PSP_CLEARING`, `PAYOUT_CLEARING`, `FEE_REVENUE` or `OPS_ADJUSTMENTS` account |
 | `creditLines({availableId, debtId, debt}, amount)` (domain, pure) | → posting lines | — | The only way money reaches a user: DEBT first, the rest to AVAILABLE. Used by `creditUser`, and inside transfer journals (bonus) |
 | `creditUser(tx, {userId, amount, source, kind, refId, description?})` | → `{journalId, alreadyBooked}` | caller's | One journal of `source −amount` + `creditLines`; locks AVAILABLE, DEBT and the source in id order before reading the debt |
-| `getBalances(userId)` | → per currency `{available, frozen, debt}` | read | No locks, no writes; unknown user returns zeros |
-| `listHistory(userId, cursor, limit)` | → postings with journal kind, ref, description; next cursor | read | Keyset on `postings (user_id, id DESC)` |
+| `getBalances(tx, userId)` | → per currency `{available, frozen, debt}` | caller's (read) | No locks, no writes; unknown user returns zeros in every currency |
+| `listHistory(tx, userId, {beforeId?, limit})` | → postings with journal kind, ref, description; `nextBeforeId` | caller's (read) | Keyset `id < beforeId ORDER BY id DESC LIMIT limit + 1` on `postings (user_id, id DESC)`, journals joined by PK |
 | `checkLedger(tx)` | → one result per invariant `{name, ok, violations[], truncated}` | caller's (read) | `ZERO_SUM`: every journal sums to 0, has ≥ 2 postings, one currency · `BALANCE_EQUALS_POSTINGS`: balance = Σ postings and = the latest `balance_after` · `NO_NEGATIVE_BALANCES`: no protected balance below 0, no DEBT above 0 · `AVAILABLE_ONLY_WITHOUT_DEBT`. Lists the first 100 violations per check |
 | `frozenBalances(tx)` | → non-zero FROZEN balances per user and currency | caller's (read) | Input to the operations FROZEN check |
 
@@ -126,8 +126,8 @@ What gets stored: 2xx responses and state-dependent 422s (`INSUFFICIENT_FUNDS`, 
 
 | Endpoint | Operation | Output |
 |---|---|---|
-| `GET /wallets/:userId` | `WalletService.getWallet(userId)` → `ledger.getBalances` | `200 {userId, balances: [{currency: "IRT" \| "USDT", available, frozen, total, debt}]}`; total = available + frozen |
-| `GET /wallets/:userId/ledger?limit&cursor` | `WalletService.getHistory` → `ledger.listHistory` | `200 {items: [{id, journalId, type, bucket, currency, amount, balanceAfter, reference: {type, id}, description, createdAt}], nextCursor}`; limit 1–100, default 20; cursor is opaque base64url of the last posting id; a bad cursor gives 400 `INVALID_CURSOR` |
+| `GET /wallets/:userId` | `WalletService.getWallet(userId)` → `ledger.getBalances`, in a read-only transaction | `200 {userId, balances: [{currency: "IRT" \| "USDT", available, frozen, total, debt}]}`; both currencies always listed; total = available + frozen; `debt` is the amount owed, zero or positive (stored as ≤ 0 on DEBT); an unknown user gets zeros and no row is created; a malformed userId gives 400 `VALIDATION_ERROR` |
+| `GET /wallets/:userId/ledger?limit&cursor` | `WalletService.getHistory` → `ledger.listHistory` | `200 {items: [{id, journalId, type, bucket, currency, amount, balanceAfter, reference: {type, id}, description, createdAt}], nextCursor}`; limit 1–100, default 20; cursor is opaque base64url of the last posting id, accepted only in exactly the form we issue; a bad cursor gives 400 `INVALID_CURSOR`; a bad or unknown query parameter gives 400 `VALIDATION_ERROR`. `amount` is signed (negative = money left the bucket); `bucket` is AVAILABLE, FROZEN or DEBT; `type` is the journal kind. Keyset, so page 1,000 costs what page 1 does (`npm run test:perf`: 1M postings, page 1,000 under 50 ms) |
 
 ### operations
 **Owns:** `adjustments` (+ `reconciliation_*`, bonus). **Depends on:** ledger, idempotency, withdrawal (open totals for the invariant check), psp (bonus).

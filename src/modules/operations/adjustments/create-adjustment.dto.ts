@@ -1,11 +1,10 @@
 import { IsIn, IsString, Length, Matches } from 'class-validator';
+import { USER_ID_MESSAGE, USER_ID_PATTERN } from '../../../common/validation';
 
 /** `POST /internal/adjustments` body. The amount stays a string until `parseApiAmount`. */
 export class CreateAdjustmentDto {
   @IsString()
-  @Matches(/^[A-Za-z0-9_-]{1,64}$/, {
-    message: 'userId must be 1-64 characters from A-Z, a-z, 0-9, _ and -',
-  })
+  @Matches(USER_ID_PATTERN, { message: USER_ID_MESSAGE })
   userId!: string;
 
   @IsIn(['IRT', 'USDT'])

@@ -1,5 +1,6 @@
 import { LedgerService } from './ledger.service';
 import { AccountsRepository } from './repositories/accounts.repository';
+import { HistoryRepository } from './repositories/history.repository';
 import { JournalsRepository } from './repositories/journals.repository';
 import { LedgerChecksRepository } from './repositories/ledger-checks.repository';
 
@@ -13,5 +14,6 @@ export function newLedgerService(): LedgerService {
     new AccountsRepository(),
     new JournalsRepository(),
     new LedgerChecksRepository(),
+    new HistoryRepository(),
   );
 }
