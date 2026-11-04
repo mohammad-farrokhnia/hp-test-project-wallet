@@ -6,6 +6,7 @@ import { ConfigModule } from './config/config.module';
 import { Env } from './config/env.schema';
 import { DatabaseModule } from './database/database.module';
 import { HealthModule } from './health/health.module';
+import { LedgerModule } from './modules/ledger';
 
 export type AppRole = Env['APP_ROLE'];
 
@@ -14,6 +15,7 @@ const SHARED_MODULES: Type[] = [
   LoggingModule,
   ErrorsModule,
   DatabaseModule,
+  LedgerModule,
   HealthModule,
 ];
 

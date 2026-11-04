@@ -1,5 +1,6 @@
 # Dependencies
 node_modules/
+t103-simulator.tar.gz
 
 # Build output
 dist/
