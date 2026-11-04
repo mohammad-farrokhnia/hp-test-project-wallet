@@ -188,6 +188,15 @@ describeDb('database plumbing (real PostgreSQL)', () => {
       expect(row.n).toBe(0);
     });
 
+    it('refuses writes in a read-only transaction', async () => {
+      await expect(
+        runner().run(
+          (tx) => tx.query('UPDATE it_lock_probe SET n = 7 WHERE id = 1'),
+          { readOnly: true, isolation: 'REPEATABLE READ' },
+        ),
+      ).rejects.toMatchObject({ driverError: { code: '25006' } });
+    });
+
     it('scopes the timeouts to the transaction (SET LOCAL)', async () => {
       const inside = await runner().run((tx) =>
         tx.query<{ lock_timeout: string }[]>('SHOW lock_timeout'),

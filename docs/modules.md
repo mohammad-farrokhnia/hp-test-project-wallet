@@ -71,12 +71,14 @@ Nothing points back: the ledger knows nothing about withdrawals, and the schedul
 |---|---|---|---|
 | `ensureUserAccounts(tx, userId, currency)` | → account ids for AVAILABLE, FROZEN, DEBT | caller's | `INSERT … ON CONFLICT DO NOTHING`, then select; safe under concurrency |
 | `lockUserAccounts(tx, userId, currency)` | → locked balances `{available, frozen, debt}` | caller's | `SELECT … FOR UPDATE` in id order; used for pre-checks |
-| `post(tx, journal)` | `{kind, refType, refId, currency, description, lines[{account, amount}]}` → journalId | caller's | Locks the accounts not yet locked, in id order; checks the sum is 0 and no protected balance goes negative; inserts journal + postings with `balance_after`; updates balances. A duplicate `(kind, ref)` returns the existing journal and `alreadyBooked = true`, so callers stay idempotent |
+| `post(tx, journal)` | `{kind, refId, currency, description?, reversesJournalId?, lines[{accountId, amount: Money}]}` → `{journalId, alreadyBooked}` | caller's | Validates first (≥ 2 non-zero lines, one currency, no account twice, sum 0); locks the accounts in id order (already-held rows don't wait); inserts the journal, whose `refType` follows from `kind`; computes `balance_after` per line and refuses a protected balance below zero or DEBT above zero; inserts the postings; updates the balances. A duplicate `(kind, ref)` writes nothing and returns the existing journal with `alreadyBooked = true`, so callers stay idempotent. Accounts are locked before the journal insert so a duplicate waits on the account lock instead of holding one. Failures are `LedgerError` (`INVALID_JOURNAL`, `ACCOUNT_NOT_FOUND`, `INSUFFICIENT_BALANCE`): caller bugs, so 500 at the edge |
+| `systemAccountId(tx, kind, currency)` | → account id | caller's | The seeded `PSP_CLEARING`, `PAYOUT_CLEARING`, `FEE_REVENUE` or `OPS_ADJUSTMENTS` account |
 | `creditLines(tx, userId, currency, amount)` | → posting lines | caller's | The only way money reaches a user: DEBT first, the rest to AVAILABLE. Used inside deposit, adjustment and transfer journals |
 | `creditUser(tx, userId, currency, amount, sourceAccount, journalMeta)` | → journalId | caller's | Convenience: one journal of `sourceAccount −amount` + `creditLines` |
 | `getBalances(userId)` | → per currency `{available, frozen, debt}` | read | No locks, no writes; unknown user returns zeros |
 | `listHistory(userId, cursor, limit)` | → postings with journal kind, ref, description; next cursor | read | Keyset on `postings (user_id, id DESC)` |
-| `checkLedger()` | → report | read | Journals sum to 0; balance = Σ postings per account; no negative protected balances; `AVAILABLE > 0` only where `DEBT = 0` |
+| `checkLedger(tx)` | → one result per invariant `{name, ok, violations[], truncated}` | caller's (read) | `ZERO_SUM`: every journal sums to 0, has ≥ 2 postings, one currency · `BALANCE_EQUALS_POSTINGS`: balance = Σ postings and = the latest `balance_after` · `NO_NEGATIVE_BALANCES`: no protected balance below 0, no DEBT above 0 · `AVAILABLE_ONLY_WITHOUT_DEBT`. Lists the first 100 violations per check |
+| `frozenBalances(tx)` | → non-zero FROZEN balances per user and currency | caller's (read) | Input to the operations FROZEN check |
 
 ### idempotency
 **Owns:** `idempotency_keys`. **Depends on:** nothing but foundation.
@@ -130,7 +132,7 @@ What gets stored: 2xx responses and state-dependent 422s (`INSUFFICIENT_FUNDS`, 
 | Endpoint | Operation | Transaction | Notes |
 |---|---|---|---|
 | `POST /internal/adjustments` | `AdjustmentsService.create({userId, currency, amount, reason, actor}, key)` | one: claim → ensure accounts → insert adjustment → `ledger.creditUser` (ADJUSTMENT_CREDIT) → complete | `201 {adjustmentId, journalId, userId, currency, amount}`; guard; `reason` 3–500 chars |
-| `GET /internal/invariants` | `InvariantsService.check()` = `ledger.checkLedger()` + FROZEN equals `withdrawal.openTotals()` per user and currency | read | For the live demo and alerts. Lives here, not in ledger, so the ledger never depends on withdrawal |
+| `GET /internal/invariants` | `InvariantsService.check()` = `ledger.checkLedger()` + `FROZEN_EQUALS_OPEN_WITHDRAWALS` (FROZEN equals `openTotals()` per user and currency) | own: read-only, REPEATABLE READ, so every check sees one snapshot | `200 {ok, checkedAt, checks: [{name, ok, violations, truncated}]}`, also when `ok` is false. For the live demo and alerts. Lives here, not in ledger, so the ledger never depends on withdrawal. Open totals come through the `OpenWithdrawalTotals` port, which withdrawal implements (X3); until then nothing may be frozen |
 | `GET /internal/reviews` | lists deposits and withdrawals with `needs_review` | read | Optional ops view |
 | `POST /reconciliation/run` (bonus) | `ReconciliationService.run(date)` | own | Fetch CSV, match by refId, store run + mismatches, change no money; no Idempotency-Key |
 

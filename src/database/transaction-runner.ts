@@ -11,6 +11,8 @@ export interface TransactionRunnerOptions {
 
 export interface RunOptions {
   retries?: number;
+  isolation?: 'READ COMMITTED' | 'REPEATABLE READ';
+  readOnly?: boolean;
 }
 
 const DEADLOCK_DETECTED = '40P01';
@@ -30,11 +32,15 @@ export class TransactionRunner {
 
   async run<T>(
     fn: (tx: Tx) => Promise<T>,
-    { retries = 3 }: RunOptions = {},
+    {
+      retries = 3,
+      isolation = 'READ COMMITTED',
+      readOnly = false,
+    }: RunOptions = {},
   ): Promise<T> {
     for (let attempt = 0; ; attempt++) {
       try {
-        return await this.attempt(fn);
+        return await this.attempt(fn, isolation, readOnly);
       } catch (err) {
         if (attempt >= retries || !isRetryableDbError(err)) throw err;
         await sleep(this.backoff(attempt));
@@ -42,8 +48,13 @@ export class TransactionRunner {
     }
   }
 
-  private attempt<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
-    return this.ds.transaction('READ COMMITTED', async (tx) => {
+  private attempt<T>(
+    fn: (tx: Tx) => Promise<T>,
+    isolation: NonNullable<RunOptions['isolation']>,
+    readOnly: boolean,
+  ): Promise<T> {
+    return this.ds.transaction(isolation, async (tx) => {
+      if (readOnly) await tx.query('SET TRANSACTION READ ONLY');
       await tx.query(
         `SELECT set_config('lock_timeout', $1, true),
                 set_config('statement_timeout', $2, true)`,

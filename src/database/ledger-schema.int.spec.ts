@@ -146,12 +146,17 @@ describeDb('ledger schema (real PostgreSQL)', () => {
   const settle = (qr: QueryRunner) => qr.query('SET CONSTRAINTS ALL IMMEDIATE');
 
   describe('seeded system accounts', () => {
-    it('holds every system kind in both currencies with a zero balance', async () => {
+    it('holds every system kind in both currencies, seeded at zero', async () => {
       const rows = await ds.query<
         { kind: string; currency: string; balance: string; neg: boolean }[]
       >(
-        `SELECT kind, currency, balance_minor::text AS balance, allow_negative AS neg
-           FROM accounts WHERE owner_type = 'SYSTEM' ORDER BY kind, currency`,
+        `SELECT a.kind, a.currency, allow_negative AS neg,
+                (a.balance_minor - COALESCE(sum(p.amount_minor), 0))::text AS balance
+           FROM accounts a
+           LEFT JOIN postings p ON p.account_id = a.id
+          WHERE a.owner_type = 'SYSTEM'
+          GROUP BY a.id
+          ORDER BY a.kind, a.currency`,
       );
       expect(rows.map((r) => `${r.kind}/${r.currency}`)).toEqual([
         'FEE_REVENUE/IRR',

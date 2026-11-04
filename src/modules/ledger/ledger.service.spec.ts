@@ -1,6 +1,5 @@
 import { Tx } from '../../database/transaction-runner';
-import { LedgerService } from './ledger.service';
-import { AccountsRepository } from './repositories/accounts.repository';
+import { newLedgerService } from './testing';
 
 const ROWS = [
   { id: '11', kind: 'AVAILABLE' },
@@ -25,7 +24,7 @@ function txReturning(...selects: object[][]): {
 }
 
 describe('LedgerService.ensureUserAccounts', () => {
-  const service = new LedgerService(new AccountsRepository());
+  const service = newLedgerService();
 
   it('reads only when the accounts exist', async () => {
     const { tx, statements } = txReturning(ROWS);

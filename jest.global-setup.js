@@ -12,7 +12,7 @@ module.exports = async function globalSetup() {
   const dbName = env.POSTGRES_DB;
   const admin = {
     host: env.POSTGRES_HOST || 'localhost',
-    port: parseInt(env.POSTGRES_PORT || '5432', 10),
+    port: Number(env.POSTGRES_PORT || 5432),
     user: env.POSTGRES_USER || 'wallet',
     password: env.POSTGRES_PASSWORD || 'wallet',
     database: 'postgres',

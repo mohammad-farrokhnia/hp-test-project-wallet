@@ -2,13 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { DataSource } from 'typeorm';
 import { connectTestDb, describeDb } from '../../database/int-testing';
 import { TransactionRunner } from '../../database/transaction-runner';
-import { LedgerService } from './ledger.service';
-import { AccountsRepository } from './repositories/accounts.repository';
+import { newLedgerService } from './testing';
 
 describeDb('LedgerService.ensureUserAccounts (real PostgreSQL)', () => {
   let ds: DataSource;
   let runner: TransactionRunner;
-  const ledger = new LedgerService(new AccountsRepository());
+  const ledger = newLedgerService();
   const createdUsers: string[] = [];
 
   const newUser = (): string => {

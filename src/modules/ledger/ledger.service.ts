@@ -1,16 +1,34 @@
 import { Injectable } from '@nestjs/common';
 import { CurrencyCode } from '../../common/money';
 import { Tx } from '../../database/transaction-runner';
-import { UserAccountIds } from './ledger.types';
+import {
+  JournalInput,
+  planPostings,
+  SystemAccountKind,
+  validateJournal,
+} from './domain/journal';
+import {
+  INVARIANT_VIOLATION_LIMIT,
+  InvariantCheck,
+  toInvariantCheck,
+} from './domain/invariants';
+import { LedgerError } from './domain/ledger.error';
+import { FrozenBalance, PostResult, UserAccountIds } from './ledger.types';
 import { AccountsRepository } from './repositories/accounts.repository';
+import { JournalsRepository } from './repositories/journals.repository';
+import { LedgerChecksRepository } from './repositories/ledger-checks.repository';
 
 /**
  * @class LedgerService
- * @description The ledger's public door: the only code that reads or writes accounts, journals and postings.
+ * @description The ledger's public door: the only code that reads or writes accounts, journals and postings, and the only writer of money.
  */
 @Injectable()
 export class LedgerService {
-  constructor(private readonly accounts: AccountsRepository) {}
+  constructor(
+    private readonly accounts: AccountsRepository,
+    private readonly journals: JournalsRepository,
+    private readonly checks: LedgerChecksRepository,
+  ) {}
 
   /**
    * @function ensureUserAccounts
@@ -36,5 +54,99 @@ export class LedgerService {
       );
     }
     return created;
+  }
+
+  /**
+   * @function systemAccountId
+   * @param tx - the caller's transaction
+   * @param kind - `PSP_CLEARING`, `PAYOUT_CLEARING`, `FEE_REVENUE` or `OPS_ADJUSTMENTS`
+   * @param currency - `IRR` or `USDT`
+   * @returns the seeded system account's id
+   * @throws {LedgerError} `ACCOUNT_NOT_FOUND` if the seed migration did not run
+   */
+  async systemAccountId(
+    tx: Tx,
+    kind: SystemAccountKind,
+    currency: CurrencyCode,
+  ): Promise<bigint> {
+    const id = await this.accounts.findSystemAccountId(tx, kind, currency);
+    if (id === null) {
+      throw new LedgerError(
+        'ACCOUNT_NOT_FOUND',
+        `system account ${kind} ${currency} is not seeded`,
+      );
+    }
+    return id;
+  }
+
+  /**
+   * @function post
+   * @description Books one journal, all inside the caller's transaction:
+   * 1. validate the lines (non-zero, one currency, sum zero) before taking any lock;
+   * 2. lock every account in ascending id order;
+   * 3. insert the journal; if `(kind, ref)` is already booked, stop and return it;
+   * 4. compute each balance after and refuse a protected balance below zero;
+   * 5. append the postings with `balance_after`, then update the balances.
+   * Locks come before the journal insert so a duplicate waits on the account lock instead of holding one, which keeps the lock order intact.
+   * @param tx - the caller's transaction
+   * @param journal - the event to book
+   * @returns the journal id and whether it was already booked
+   * @throws {LedgerError} `INVALID_JOURNAL`, `ACCOUNT_NOT_FOUND`, `INSUFFICIENT_BALANCE`
+   */
+  async post(tx: Tx, journal: JournalInput): Promise<PostResult> {
+    validateJournal(journal);
+
+    const ids = journal.lines.map((l) => l.accountId);
+    const locked = await this.accounts.lockAccountsById(tx, ids);
+
+    const journalId = await this.journals.insertJournal(tx, journal);
+    if (journalId === null) {
+      return {
+        journalId: await this.journals.findJournalId(tx, journal),
+        alreadyBooked: true,
+      };
+    }
+
+    const postings = planPostings(journal, locked);
+    await this.journals.insertPostings(tx, journalId, postings);
+    for (const p of postings) {
+      await this.accounts.setBalance(tx, p.account.id, p.balanceAfter);
+    }
+    return { journalId, alreadyBooked: false };
+  }
+
+  /**
+   * @function checkLedger
+   * @description The ledger's own invariants: every journal sums to zero; every balance equals the sum of its postings and its latest `balance_after`; no protected balance below zero; no AVAILABLE money while in DEBT. Run it in a REPEATABLE READ transaction so all checks see one snapshot.
+   * @param tx - a (read-only) transaction
+   * @returns one result per invariant
+   */
+  async checkLedger(tx: Tx): Promise<InvariantCheck[]> {
+    const limit = INVARIANT_VIOLATION_LIMIT + 1;
+    const c = this.checks;
+    return [
+      toInvariantCheck('ZERO_SUM', await c.unbalancedJournals(tx, limit)),
+      toInvariantCheck(
+        'BALANCE_EQUALS_POSTINGS',
+        await c.balancesDifferingFromPostings(tx, limit),
+      ),
+      toInvariantCheck(
+        'NO_NEGATIVE_BALANCES',
+        await c.negativeBalances(tx, limit),
+      ),
+      toInvariantCheck(
+        'AVAILABLE_ONLY_WITHOUT_DEBT',
+        await c.availableWithDebt(tx, limit),
+      ),
+    ];
+  }
+
+  /**
+   * @function frozenBalances
+   * @param tx - the caller's transaction
+   * @returns every user FROZEN balance that is not zero, by user and currency
+   */
+  frozenBalances(tx: Tx): Promise<FrozenBalance[]> {
+    return this.checks.nonZeroFrozenBalances(tx);
   }
 }

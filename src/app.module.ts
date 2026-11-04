@@ -7,6 +7,7 @@ import { Env } from './config/env.schema';
 import { DatabaseModule } from './database/database.module';
 import { HealthModule } from './health/health.module';
 import { LedgerModule } from './modules/ledger';
+import { OperationsModule } from './modules/operations';
 
 export type AppRole = Env['APP_ROLE'];
 
@@ -19,7 +20,7 @@ const SHARED_MODULES: Type[] = [
   HealthModule,
 ];
 
-const API_MODULES: Type[] = [ValidationModule];
+const API_MODULES: Type[] = [ValidationModule, OperationsModule];
 
 const WORKER_MODULES: Type[] = [];
 

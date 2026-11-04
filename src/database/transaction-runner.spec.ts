@@ -52,6 +52,16 @@ describe('TransactionRunner', () => {
     expect(queries[0].params).toEqual(['3000ms', '5000ms']);
   });
 
+  it('runs a read-only REPEATABLE READ snapshot when asked', async () => {
+    const { runner, queries, isolation } = setup();
+    await runner.run(() => Promise.resolve(), {
+      isolation: 'REPEATABLE READ',
+      readOnly: true,
+    });
+    expect(isolation).toEqual(['REPEATABLE READ']);
+    expect(queries[0].sql).toBe('SET TRANSACTION READ ONLY');
+  });
+
   it('retries the whole function after a deadlock (40P01)', async () => {
     const fn = failing(failure('40P01'), 2);
     await expect(setup().runner.run(fn)).resolves.toBe('done');

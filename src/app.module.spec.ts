@@ -6,6 +6,7 @@ import { ValidationModule } from './common/validation';
 import { TEST_ENV } from './config/testing';
 import { fakeDataSource } from './database/testing';
 import { HealthController } from './health/health.controller';
+import { InvariantsController } from './modules/operations/invariants/invariants.controller';
 
 beforeAll(() => Object.assign(process.env, TEST_ENV));
 
@@ -29,7 +30,10 @@ describe('AppModule.forRole', () => {
   it('api loads the HTTP edge and the probes', async () => {
     const { moduleTypes, controllers } = await bootRole('api');
     expect(moduleTypes).toContain(ValidationModule);
-    expect(controllers).toEqual([HealthController]);
+    expect(controllers).toEqual(
+      expect.arrayContaining([HealthController, InvariantsController]),
+    );
+    expect(controllers).toHaveLength(2);
   });
 
   it('worker loads no HTTP edge and only the probe controller', async () => {
@@ -41,6 +45,9 @@ describe('AppModule.forRole', () => {
   it('all loads the HTTP edge as well', async () => {
     const { moduleTypes, controllers } = await bootRole('all');
     expect(moduleTypes).toContain(ValidationModule);
-    expect(controllers).toEqual([HealthController]);
+    expect(controllers).toEqual(
+      expect.arrayContaining([HealthController, InvariantsController]),
+    );
+    expect(controllers).toHaveLength(2);
   });
 });
