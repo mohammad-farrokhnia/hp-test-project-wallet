@@ -6,6 +6,7 @@ import { ValidationModule } from './common/validation';
 import { TEST_ENV } from './config/testing';
 import { fakeDataSource } from './database/testing';
 import { HealthController } from './health/health.controller';
+import { AdjustmentsController } from './modules/operations/adjustments/adjustments.controller';
 import { InvariantsController } from './modules/operations/invariants/invariants.controller';
 
 beforeAll(() => Object.assign(process.env, TEST_ENV));
@@ -31,9 +32,13 @@ describe('AppModule.forRole', () => {
     const { moduleTypes, controllers } = await bootRole('api');
     expect(moduleTypes).toContain(ValidationModule);
     expect(controllers).toEqual(
-      expect.arrayContaining([HealthController, InvariantsController]),
+      expect.arrayContaining([
+        HealthController,
+        InvariantsController,
+        AdjustmentsController,
+      ]),
     );
-    expect(controllers).toHaveLength(2);
+    expect(controllers).toHaveLength(3);
   });
 
   it('worker loads no HTTP edge and only the probe controller', async () => {
@@ -46,8 +51,12 @@ describe('AppModule.forRole', () => {
     const { moduleTypes, controllers } = await bootRole('all');
     expect(moduleTypes).toContain(ValidationModule);
     expect(controllers).toEqual(
-      expect.arrayContaining([HealthController, InvariantsController]),
+      expect.arrayContaining([
+        HealthController,
+        InvariantsController,
+        AdjustmentsController,
+      ]),
     );
-    expect(controllers).toHaveLength(2);
+    expect(controllers).toHaveLength(3);
   });
 });

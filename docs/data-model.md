@@ -308,9 +308,11 @@ Every submit to the payout service, opened **before** the call.
 | currency | text | no | |
 | amount_minor | bigint | no | `> 0`; increases only |
 | reason | text | no | `CHECK (char_length(reason) BETWEEN 3 AND 500)` |
-| actor | text | yes | from `X-Operator-Id` |
+| actor | text | yes | from `X-Operator-Id`; 1–128 characters |
 | journal_id | bigint | no | unique FK `journals` |
 | created_at | timestamptz | no | |
+
+- `CHECK` on `user_id` format and currency; `INDEX (user_id, created_at DESC)`.
 
 ### `reconciliation_runs` and `reconciliation_mismatches` (bonus)
 

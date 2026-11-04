@@ -1,5 +1,6 @@
 import { DynamicModule, Module, Type } from '@nestjs/common';
 import { ErrorsModule } from './common/errors';
+import { GuardsModule } from './common/guards';
 import { LoggingModule } from './common/logging';
 import { ValidationModule } from './common/validation';
 import { ConfigModule } from './config/config.module';
@@ -25,7 +26,7 @@ const SHARED_MODULES: Type[] = [
   HealthModule,
 ];
 
-const API_MODULES: Type[] = [ValidationModule, OperationsModule];
+const API_MODULES: Type[] = [ValidationModule, GuardsModule, OperationsModule];
 
 const WORKER_MODULES: Type[] = [IdempotencyCleanupModule];
 

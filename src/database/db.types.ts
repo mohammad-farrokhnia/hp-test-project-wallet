@@ -42,6 +42,17 @@ export interface Accounts {
   user_id: string | null;
 }
 
+export interface Adjustments {
+  actor: string | null;
+  amount_minor: Int8;
+  created_at: Generated<Timestamp>;
+  currency: string;
+  id: string;
+  journal_id: Int8;
+  reason: string;
+  user_id: string;
+}
+
 export interface IdempotencyKeys {
   completed_at: Timestamp | null;
   created_at: Generated<Timestamp>;
@@ -81,6 +92,7 @@ export interface Postings {
 
 export interface DB {
   accounts: Accounts;
+  adjustments: Adjustments;
   idempotency_keys: IdempotencyKeys;
   journals: Journals;
   postings: Postings;

@@ -12,8 +12,14 @@ import {
   InvariantCheck,
   toInvariantCheck,
 } from './domain/invariants';
+import { creditLines } from './domain/credit';
 import { LedgerError } from './domain/ledger.error';
-import { FrozenBalance, PostResult, UserAccountIds } from './ledger.types';
+import {
+  CreditUserInput,
+  FrozenBalance,
+  PostResult,
+  UserAccountIds,
+} from './ledger.types';
 import { AccountsRepository } from './repositories/accounts.repository';
 import { JournalsRepository } from './repositories/journals.repository';
 import { LedgerChecksRepository } from './repositories/ledger-checks.repository';
@@ -77,6 +83,51 @@ export class LedgerService {
       );
     }
     return id;
+  }
+
+  /**
+   * @function creditUser
+   * @description Books one credit journal: the source system account gives `amount`, and the user receives it through `creditLines`, DEBT first. Creates the user's accounts on first use. Locks the user's AVAILABLE and DEBT and the source in id order before reading the debt, so the split is computed on the balances `post` will update.
+   * @param tx - the caller's transaction
+   * @param credit - who, how much, from which system account, and the journal's kind and ref
+   * @returns the journal id and whether it was already booked
+   * @throws {LedgerError} `INVALID_JOURNAL` for a non-positive amount, `ACCOUNT_NOT_FOUND`
+   */
+  async creditUser(tx: Tx, credit: CreditUserInput): Promise<PostResult> {
+    const { userId, amount } = credit;
+    const user = await this.ensureUserAccounts(tx, userId, amount.currency);
+    const sourceId = await this.systemAccountId(
+      tx,
+      credit.source,
+      amount.currency,
+    );
+    const locked = await this.accounts.lockAccountsById(tx, [
+      user.available,
+      user.debt,
+      sourceId,
+    ]);
+    const debt = locked.get(user.debt);
+    if (!debt) {
+      throw new LedgerError('ACCOUNT_NOT_FOUND', `DEBT of ${userId} vanished`);
+    }
+
+    return this.post(tx, {
+      kind: credit.kind,
+      refId: credit.refId,
+      currency: amount.currency,
+      description: credit.description,
+      lines: [
+        { accountId: sourceId, amount: amount.negate() },
+        ...creditLines(
+          {
+            availableId: user.available,
+            debtId: user.debt,
+            debt: debt.balance,
+          },
+          amount,
+        ),
+      ],
+    });
   }
 
   /**
