@@ -16,6 +16,18 @@ export type Int8 = ColumnType<
   bigint | number | string
 >;
 
+export type Json = JsonValue;
+
+export type JsonArray = JsonValue[];
+
+export type JsonObject = {
+  [x: string]: JsonValue | undefined;
+};
+
+export type JsonPrimitive = boolean | number | string | null;
+
+export type JsonValue = JsonArray | JsonObject | JsonPrimitive;
+
 export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
 export interface Accounts {
@@ -28,6 +40,20 @@ export interface Accounts {
   owner_type: string;
   updated_at: Generated<Timestamp>;
   user_id: string | null;
+}
+
+export interface IdempotencyKeys {
+  completed_at: Timestamp | null;
+  created_at: Generated<Timestamp>;
+  fingerprint: string;
+  key: string;
+  locked_until: Timestamp | null;
+  resource_id: string | null;
+  resource_type: string | null;
+  response_body: Json | null;
+  response_status: number | null;
+  scope: string;
+  status: string;
 }
 
 export interface Journals {
@@ -55,6 +81,7 @@ export interface Postings {
 
 export interface DB {
   accounts: Accounts;
+  idempotency_keys: IdempotencyKeys;
   journals: Journals;
   postings: Postings;
 }

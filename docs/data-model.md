@@ -330,17 +330,18 @@ id uuid PK · from_user_id · to_user_id · currency · amount_minor `> 0` · jo
 
 | Column | Type | Null | Notes |
 |---|---|---|---|
-| key | text | no | PK; 1–255 printable characters; global scope |
+| key | text | no | PK; 1–255 printable ASCII characters (`CHECK`); global scope |
 | scope | text | no | `POST /withdrawals`, `POST /deposits`, … |
 | fingerprint | text | no | sha256 of scope + canonical JSON body |
 | status | text | no | `IN_PROGRESS` \| `COMPLETED` |
 | response_status | int | yes | required when `COMPLETED` |
-| response_body | jsonb | yes | required when `COMPLETED` |
+| response_body | json | yes | required when `COMPLETED`; `json`, not `jsonb`, so a replay is byte for byte the original (`jsonb` reorders keys) |
 | resource_type, resource_id | text, uuid | yes | the record the request created |
 | locked_until | timestamptz | yes | lease, used only by the two-phase deposit create |
 | created_at, completed_at | timestamptz | | |
 
 - `CHECK (status <> 'COMPLETED' OR (response_status IS NOT NULL AND response_body IS NOT NULL))`
+- `CHECK ((completed_at IS NOT NULL) = (status = 'COMPLETED'))`, `CHECK ((resource_type IS NULL) = (resource_id IS NULL))`
 - `INDEX (created_at)` for the 7-day cleanup.
 
 ### `outbox` (owned by the messaging module)

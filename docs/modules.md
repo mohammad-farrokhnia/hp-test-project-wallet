@@ -85,10 +85,11 @@ Nothing points back: the ledger knows nothing about withdrawals, and the schedul
 
 | Operation | Input → output | Transaction | Notes / errors |
 |---|---|---|---|
-| `claim(tx, {key, scope, body})` | → `NEW` \| `REPLAY {status, body}` | caller's | `INSERT … ON CONFLICT DO NOTHING`. A concurrent twin blocks until the first commits, then replays. Different fingerprint → `IDEMPOTENCY_KEY_REUSED` (422). Wait exceeds `lock_timeout` → `IDEMPOTENCY_IN_PROGRESS` (409) |
-| `complete(tx, key, status, body, resource)` | → void | caller's | Stores the exact response to replay |
-| `claimWithLease({key, scope, body}, seconds)` | → `NEW` \| `REPLAY` \| `IN_PROGRESS` \| `RESUME {resourceId}` | own | Two-phase deposit create only. An expired lease means the earlier attempt died, so the caller resumes it |
-| `releaseLease(key)` | → void | own | After a provider failure, so a retry can resume at once |
+| `claim(tx, {key, scope, body})` | → `NEW` \| `REPLAY {status, body}` | caller's, before any other lock | `INSERT … ON CONFLICT DO NOTHING`. A concurrent twin blocks until the first commits, then replays (or gets `NEW` if the first rolled back). Fingerprint = sha256(scope + canonical JSON body, keys sorted). Different fingerprint, including the same key on another route → `IDEMPOTENCY_KEY_REUSED` (422). Wait exceeds `lock_timeout` → `IDEMPOTENCY_IN_PROGRESS` (409) |
+| `complete(tx, key, {status, body}, resource?)` | → void | caller's | Stores the exact response to replay (as `json`, so byte for byte); key must be `IN_PROGRESS` |
+| `claimWithLease(tx, {key, scope, body}, seconds)` | → `NEW` \| `REPLAY` \| `IN_PROGRESS` \| `RESUME {resource}` | caller's: the same transaction inserts the deposit and calls `attachResource`, then commits before the PSP call | Two-phase deposit create only. Lease = `locked_until` on the database clock. A twin inside the lease gets `IN_PROGRESS`; once the lease is released or expired (the earlier attempt died), a retry gets `RESUME` with the record and a new lease |
+| `attachResource(tx, key, {type, id})` | → void | caller's | Records what a leased request created, so `RESUME` can return it |
+| `releaseLease(tx, key)` | → void | caller's | After an ambiguous provider failure, so a retry can resume at once |
 | `purgeOlderThan(days)` | → count | own | Scheduler, hourly |
 
 What gets stored: 2xx responses and state-dependent 422s (`INSUFFICIENT_FUNDS`, `DAILY_LIMIT_EXCEEDED`). Not stored: 400s and pre-transaction 422s like `BELOW_MINIMUM` (recomputed identically), and 5xx (the transaction rolled back). The `@IdempotencyKey()` parameter decorator rejects a missing header with `IDEMPOTENCY_KEY_REQUIRED` (400).

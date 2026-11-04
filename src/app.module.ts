@@ -6,6 +6,7 @@ import { ConfigModule } from './config/config.module';
 import { Env } from './config/env.schema';
 import { DatabaseModule } from './database/database.module';
 import { HealthModule } from './health/health.module';
+import { IdempotencyModule } from './modules/idempotency';
 import { LedgerModule } from './modules/ledger';
 import { OperationsModule } from './modules/operations';
 
@@ -17,6 +18,7 @@ const SHARED_MODULES: Type[] = [
   ErrorsModule,
   DatabaseModule,
   LedgerModule,
+  IdempotencyModule,
   HealthModule,
 ];
 
