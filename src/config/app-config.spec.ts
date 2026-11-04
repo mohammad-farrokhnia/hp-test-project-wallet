@@ -28,8 +28,29 @@ describe('loadConfig', () => {
   });
 
   it('fails fast on a missing variable', () => {
-    const { DATABASE_URL: _omit, ...rest } = TEST_ENV;
-    expect(() => loadConfig(rest)).toThrow(/DATABASE_URL/);
+    const { RABBITMQ_URL: _omit, ...rest } = TEST_ENV;
+    expect(() => loadConfig(rest)).toThrow(/RABBITMQ_URL/);
+  });
+
+  it('builds the database url from the POSTGRES_* parts', () => {
+    expect(loadConfig(TEST_ENV).db.url).toBe(
+      'postgres://wallet:wallet@localhost:5432/wallet',
+    );
+    const c = loadConfig({
+      ...TEST_ENV,
+      POSTGRES_HOST: 'db',
+      POSTGRES_PORT: '55432',
+      POSTGRES_USER: 'u',
+      POSTGRES_PASSWORD: 'p@ss/word',
+      POSTGRES_DB: 'w',
+    });
+    expect(c.db.url).toBe('postgres://u:p%40ss%2Fword@db:55432/w');
+  });
+
+  it.each(['0', '70000', 'abc'])('rejects POSTGRES_PORT=%s', (port) => {
+    expect(() => loadConfig({ ...TEST_ENV, POSTGRES_PORT: port })).toThrow(
+      /POSTGRES_PORT/,
+    );
   });
 
   it('rejects decimal money', () => {

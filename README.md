@@ -65,7 +65,7 @@ cp .env.example .env
 
 `.env` is optional for Docker (every value has a default) and required to run the app or tests on your machine. Compose reads it too, so credentials, ports and limits are set in one place. Every variable is validated at startup and the app refuses to start on a missing or malformed one (`src/config/env.schema.ts`).
 
-`DATABASE_URL`, `RABBITMQ_URL` and the `*_BASE_URL` values in `.env` point at `localhost` for running on your machine. Inside Docker, compose builds the container-network versions itself, so those lines are ignored there. If you change `POSTGRES_PORT`, change the port in `DATABASE_URL` to match.
+The database connection is built from `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB`, so `POSTGRES_PORT` is the single port: compose publishes Postgres on it and the app connects to it. `RABBITMQ_URL` and the `*_BASE_URL` values in `.env` point at `localhost` for running on your machine. Inside Docker, compose supplies the container-network host and port itself, so those lines are ignored there.
 
 ## Running on your machine
 
@@ -78,6 +78,14 @@ npm run start:dev
 
 Other scripts: `npm run build`, `npm run lint` (applies fixes), `npm run format`.
 
+**After adding or changing a migration**, regenerate the query types and commit the result:
+
+```bash
+npm run db:types   # applies pending migrations to your dev DB, then writes src/database/db.types.ts
+```
+
+Repositories build SQL with `db(tx)` (Kysely, typed from that file) inside `TransactionRunner.run()`; see ADR-013.
+
 ## Running the tests
 
 Unit tests need nothing. The database integration tests (`*.int.spec.ts`) run against a real PostgreSQL and use their **own database, `wallet_test`**, never your dev data. Create the test config once:
@@ -85,7 +93,7 @@ Unit tests need nothing. The database integration tests (`*.int.spec.ts`) run ag
 **1. Create `.env.test`** in the project root. It is git-ignored, like `.env`:
 
 ```dotenv
-DATABASE_URL=postgres://wallet:wallet@localhost:5432/wallet_test
+POSTGRES_DB=wallet_test
 RABBITMQ_URL=amqp://guest:guest@localhost:5672
 PSP_BASE_URL=http://localhost:8080
 PAYOUT_BASE_URL=http://localhost:8080
@@ -93,7 +101,7 @@ PUBLIC_BASE_URL=http://localhost:3000
 PAYOUT_WEBHOOK_SECRET=hamtapay-sim-secret
 ```
 
-Use the same user, password and port as `POSTGRES_*` in your `.env`. The database name **must end in `_test`**: the run refuses to start otherwise, because the tests truncate and drop tables.
+Host, port, user and password come from `POSTGRES_*` in your `.env`; only the database name is overridden. `POSTGRES_DB` **must end in `_test`**: the run refuses to start otherwise, because the tests truncate and drop tables.
 
 **2. Start PostgreSQL and run:**
 
@@ -102,7 +110,7 @@ docker compose up -d --wait postgres
 npm test
 ```
 
-`wallet_test` is created automatically on the first run. Values in `.env.test` win over your shell and `.env`, so an exported dev `DATABASE_URL` cannot leak into a test run.
+`wallet_test` is created automatically on the first run. Values in `.env.test` win over your shell and `.env`, so an exported dev `POSTGRES_DB` cannot leak into a test run.
 
 If PostgreSQL is not running, the unit tests still pass and the integration suite fails with `ECONNREFUSED`. If `.env.test` is missing, the run stops with an error pointing here.
 

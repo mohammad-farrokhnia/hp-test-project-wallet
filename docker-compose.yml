@@ -4,8 +4,8 @@
 # Config comes from .env (optional, see .env.example): compose reads it for ${VAR}
 # interpolation, and env_file passes the app's own settings (limits, timeouts, expiry)
 # through, so their defaults stay in src/config/env.schema.ts. No .env = working defaults.
-# DATABASE_URL, RABBITMQ_URL and the *_BASE_URL values are NOT read from .env: there they
-# point at localhost (app on the host); in the compose network they name containers.
+# POSTGRES_HOST, POSTGRES_PORT, RABBITMQ_URL and the *_BASE_URL values are NOT read from .env:
+# there they point at localhost (app on the host); in the compose network they name containers.
 name: wallet
 
 x-app-image: &app-image
@@ -18,7 +18,8 @@ x-app-image: &app-image
 
 x-app-env: &app-env
   PORT: ${PORT:-3000}
-  DATABASE_URL: postgres://${POSTGRES_USER:-wallet}:${POSTGRES_PASSWORD:-wallet}@postgres:5432/${POSTGRES_DB:-wallet}
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: "5432" # container port; .env POSTGRES_PORT is the host-published one
   RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:-guest}@rabbitmq:5672
   # One simulator serves both the PSP and the payout service.
   PSP_BASE_URL: http://simulator:8080
@@ -137,7 +138,7 @@ services:
         required: false
     environment:
       <<: *app-env
-      DATABASE_URL: postgres://${POSTGRES_USER:-wallet}:${POSTGRES_PASSWORD:-wallet}@postgres:5432/${POSTGRES_TEST_DB:-wallet_test}
+      POSTGRES_DB: ${POSTGRES_TEST_DB:-wallet_test}
       CI: "true"
     depends_on:
       postgres: { condition: service_healthy }

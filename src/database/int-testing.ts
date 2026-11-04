@@ -1,20 +1,21 @@
 import { DataSource } from 'typeorm';
+import { databaseUrlFromEnv } from '../config/database-url';
 import { createDataSource } from './data-source';
 import { runMigrations } from './migrator';
 
-const url = process.env.DATABASE_URL;
+const url = databaseUrlFromEnv();
 if (url && !/_test$/.test(new URL(url).pathname.slice(1))) {
   throw new Error('integration specs must run against a *_test database');
 }
 
 /**
- * @description `describe` when `DATABASE_URL` points at a `*_test` database, `describe.skip` otherwise.
+ * @description `describe` when `POSTGRES_DB` names at a `*_test` database, `describe.skip` otherwise.
  */
 export const describeDb = url ? describe : describe.skip;
 
 if (!url) {
   process.stderr.write(
-    'integration specs SKIPPED: DATABASE_URL is not set (put it in .env, or use the compose test service)\n',
+    'integration specs SKIPPED: POSTGRES_DB is not set (put it in .env, or use the compose test service)\n',
   );
 }
 

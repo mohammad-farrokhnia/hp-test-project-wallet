@@ -17,7 +17,13 @@ export const envSchema = z.object({
     .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
     .default('info'),
 
-  DATABASE_URL: z.url(),
+  // The connection string is built from these (src/config/database-url.ts), so
+  // the port has one source of truth, shared with docker compose.
+  POSTGRES_HOST: z.string().min(1).default('localhost'),
+  POSTGRES_PORT: z.coerce.number().int().min(1).max(65535).default(5432),
+  POSTGRES_USER: z.string().min(1).default('wallet'),
+  POSTGRES_PASSWORD: z.string().min(1).default('wallet'),
+  POSTGRES_DB: z.string().min(1).default('wallet'),
   RABBITMQ_URL: z.url(),
 
   PSP_BASE_URL: z.url(),

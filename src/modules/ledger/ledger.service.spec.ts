@@ -14,13 +14,14 @@ function txReturning(...selects: object[][]): {
 } {
   const statements: string[] = [];
   const queue = [...selects];
-  const query = (sql: string): Promise<object[]> => {
-    statements.push(sql.trim().split(/\s+/)[0]);
-    return Promise.resolve(
-      sql.trim().startsWith('SELECT') ? queue.shift()! : [],
-    );
+  const query = (sql: string): Promise<{ records: object[] }> => {
+    const verb = sql.trim().split(/\s+/)[0].toUpperCase();
+    statements.push(verb);
+    return Promise.resolve({
+      records: verb === 'SELECT' ? queue.shift()! : [],
+    });
   };
-  return { tx: { query } as unknown as Tx, statements };
+  return { tx: { queryRunner: { query } } as unknown as Tx, statements };
 }
 
 describe('LedgerService.ensureUserAccounts', () => {

@@ -60,20 +60,22 @@ describeDb('LedgerService.ensureUserAccounts (real PostgreSQL)', () => {
 
   it('returns the same ids on every later call and writes nothing', async () => {
     const userId = newUser();
+    // Per-user row versions, not the global accounts_id_seq: other suites share
+    // this database and advance that sequence while this one runs.
+    const versions = () =>
+      ds.query<{ id: string; xmin: string }[]>(
+        'SELECT id::text, xmin::text FROM accounts WHERE user_id = $1 ORDER BY id',
+        [userId],
+      );
     const first = await runner.run((tx) =>
       ledger.ensureUserAccounts(tx, userId, 'IRR'),
     );
-    const [{ last }] = await ds.query<{ last: string }[]>(
-      `SELECT last_value::text AS last FROM pg_sequences WHERE sequencename LIKE 'accounts_id_seq'`,
-    );
+    const before = await versions();
     const again = await runner.run((tx) =>
       ledger.ensureUserAccounts(tx, userId, 'IRR'),
     );
-    const [{ last: after }] = await ds.query<{ last: string }[]>(
-      `SELECT last_value::text AS last FROM pg_sequences WHERE sequencename LIKE 'accounts_id_seq'`,
-    );
     expect(again).toEqual(first);
-    expect(after).toBe(last);
+    expect(await versions()).toEqual(before);
   });
 
   it('keeps one account set per currency', async () => {

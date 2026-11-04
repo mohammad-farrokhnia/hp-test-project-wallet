@@ -6,19 +6,20 @@ import {
   PrimaryColumn,
   QueryRunner,
 } from 'typeorm';
+import { databaseUrlFromEnv } from '../config/database-url';
 import { bigintTransformer } from './bigint.transformer';
 import { createDataSource } from './data-source';
 import { runMigrations } from './migrator';
 import { TransactionRunner } from './transaction-runner';
 
-const url = process.env.DATABASE_URL;
+const url = databaseUrlFromEnv();
 if (url && !/_test$/.test(new URL(url).pathname.slice(1))) {
   throw new Error('database.int.spec must run against a *_test database');
 }
 const describeDb = url ? describe : describe.skip;
 if (!url) {
   process.stderr.write(
-    'database.int.spec SKIPPED: DATABASE_URL is not set (put it in .env, or use the compose test service)\n',
+    'database.int.spec SKIPPED: POSTGRES_DB is not set (put it in .env, or use the compose test service)\n',
   );
 }
 const cfg = {

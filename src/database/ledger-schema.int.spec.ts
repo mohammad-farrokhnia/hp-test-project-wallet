@@ -1,16 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import { DataSource, QueryRunner } from 'typeorm';
+import { databaseUrlFromEnv } from '../config/database-url';
 import { createDataSource } from './data-source';
 import { runMigrations } from './migrator';
 
-const url = process.env.DATABASE_URL;
+const url = databaseUrlFromEnv();
 if (url && !/_test$/.test(new URL(url).pathname.slice(1))) {
   throw new Error('ledger-schema.int.spec must run against a *_test database');
 }
 const describeDb = url ? describe : describe.skip;
 if (!url) {
   process.stderr.write(
-    'ledger-schema.int.spec SKIPPED: DATABASE_URL is not set (put it in .env, or use the compose test service)\n',
+    'ledger-schema.int.spec SKIPPED: POSTGRES_DB is not set (put it in .env, or use the compose test service)\n',
   );
 }
 
@@ -369,23 +370,23 @@ describeDb('ledger schema (real PostgreSQL)', () => {
     it('stores balances beyond 2^53 without loss', async () => {
       await sandbox(async (qr) => {
         const id = await userAccount(qr, 'alice', 'AVAILABLE');
-        const [row] = await qr.manager.query<{ b: string }[]>(
+        const [rows] = await qr.manager.query<[{ b: string }[], number]>(
           `UPDATE accounts SET balance_minor = 9223372036854775807 WHERE id = $1 RETURNING balance_minor::text AS b`,
           [id],
         );
-        expect(row.b).toBe('9223372036854775807');
+        expect(rows[0].b).toBe('9223372036854775807');
       });
     });
 
     it('refreshes updated_at on every change', async () => {
       await sandbox(async (qr) => {
         const id = await userAccount(qr, 'alice', 'AVAILABLE');
-        const [row] = await qr.manager.query<{ moved: boolean }[]>(
+        const [rows] = await qr.manager.query<[{ moved: boolean }[], number]>(
           `UPDATE accounts SET balance_minor = 1, updated_at = '2000-01-01'
             WHERE id = $1 RETURNING updated_at > '2000-01-01' AS moved`,
           [id],
         );
-        expect(row.moved).toBe(true);
+        expect(rows[0].moved).toBe(true);
       });
     });
   });

@@ -3,23 +3,27 @@ const loadTestEnv = require('./jest.load-env');
 
 /**
  * @function globalSetup
- * @description Creates the `_test` database named by `DATABASE_URL` if it does not exist.
+ * @description Creates the `_test` database named by `POSTGRES_DB` if it does not exist.
  */
 module.exports = async function globalSetup() {
   const env = loadTestEnv(process.env);
-  if (!env.DATABASE_URL) return;
+  if (!env.POSTGRES_DB) return;
 
-  const target = new URL(env.DATABASE_URL);
-  const dbName = decodeURIComponent(target.pathname.slice(1));
-  const admin = new URL(target);
-  admin.pathname = '/postgres';
+  const dbName = env.POSTGRES_DB;
+  const admin = {
+    host: env.POSTGRES_HOST || 'localhost',
+    port: parseInt(env.POSTGRES_PORT || '5432', 10),
+    user: env.POSTGRES_USER || 'wallet',
+    password: env.POSTGRES_PASSWORD || 'wallet',
+    database: 'postgres',
+  };
 
-  const client = new Client({ connectionString: admin.toString() });
+  const client = new Client(admin);
   try {
     await client.connect();
   } catch {
     process.stderr.write(
-      `\nPostgres is not reachable at ${admin.host}: database tests will fail ` +
+      `\nPostgres is not reachable at ${admin.host}:${admin.port}: database tests will fail ` +
         '(start it with `docker compose up -d --wait postgres`).\n',
     );
     return;

@@ -12,12 +12,11 @@ function read(file) {
 
 /** Tests TRUNCATE and DROP tables: refuse to run against anything not named *_test. */
 function assertTestDatabase(env) {
-  if (!env.DATABASE_URL) return;
-  const name = decodeURIComponent(new URL(env.DATABASE_URL).pathname.slice(1));
-  if (!/^[a-z0-9_]*_test$/.test(name)) {
+  if (!env.POSTGRES_DB) return;
+  if (!/^[a-z0-9_]*_test$/.test(env.POSTGRES_DB)) {
     throw new Error(
-      `Refusing to run tests against database "${name}": the name must end in "_test". ` +
-        'Create .env.test with a *_test DATABASE_URL (README, "Running the tests").',
+      `Refusing to run tests against database "${env.POSTGRES_DB}": the name must end in "_test". ` +
+        'Create .env.test with POSTGRES_DB=<name>_test (README, "Running the tests").',
     );
   }
 }

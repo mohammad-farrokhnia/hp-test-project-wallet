@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { buildDatabaseUrl } from './database-url';
 import { Env, envSchema } from './env.schema';
 
 export class AppConfig {
@@ -32,7 +33,13 @@ export class AppConfig {
       timeoutMs: e.HTTP_TIMEOUT_MS,
     };
     this.db = {
-      url: e.DATABASE_URL,
+      url: buildDatabaseUrl({
+        host: e.POSTGRES_HOST,
+        port: e.POSTGRES_PORT,
+        user: e.POSTGRES_USER,
+        password: e.POSTGRES_PASSWORD,
+        database: e.POSTGRES_DB,
+      }),
       lockTimeoutMs: e.DB_LOCK_TIMEOUT_MS,
       statementTimeoutMs: e.DB_STATEMENT_TIMEOUT_MS,
     };
