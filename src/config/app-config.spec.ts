@@ -9,6 +9,10 @@ describe('loadConfig', () => {
     expect(c.limits.withdrawMinRial).toBe(1_000_000n);
     expect(c.limits.withdrawDailyLimitRial).toBe(2_000_000_000n);
     expect(c.internalApiKey).toBeNull();
+    expect(c.idempotency).toEqual({
+      retentionDays: 7,
+      cleanupIntervalMinutes: 60,
+    });
   });
 
   it('turns the internal guard on when a key is set', () => {

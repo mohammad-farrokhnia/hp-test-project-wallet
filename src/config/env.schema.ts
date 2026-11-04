@@ -44,6 +44,9 @@ export const envSchema = z.object({
 
   DEPOSIT_EXPIRY_MINUTES: int(1440),
   REVIEW_AFTER_MINUTES: int(30),
+
+  IDEMPOTENCY_RETENTION_DAYS: int(7),
+  IDEMPOTENCY_CLEANUP_INTERVAL_MINUTES: int(60),
 });
 
 export type Env = z.infer<typeof envSchema>;

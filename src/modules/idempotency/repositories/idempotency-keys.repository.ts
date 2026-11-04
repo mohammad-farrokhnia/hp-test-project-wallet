@@ -122,6 +122,27 @@ export class IdempotencyKeysRepository {
   }
 
   /**
+   * @function deleteOlderThan
+   * @description Deletes up to `limit` keys created more than `days` ago (database clock), oldest first. `SKIP LOCKED` passes over keys a request holds right now, and lets two workers purge at once without waiting on each other.
+   * @returns how many keys were deleted
+   */
+  async deleteOlderThan(tx: Tx, days: number, limit: number): Promise<number> {
+    const { rows } = await sql<{ key: string }>`
+      WITH doomed AS (
+        SELECT key FROM idempotency_keys
+         WHERE created_at < now() - make_interval(days => ${days})
+         ORDER BY created_at
+         LIMIT ${limit}
+           FOR UPDATE SKIP LOCKED
+      )
+      DELETE FROM idempotency_keys k
+       USING doomed
+       WHERE k.key = doomed.key
+      RETURNING k.key`.execute(db(tx));
+    return rows.length;
+  }
+
+  /**
    * @function complete
    * @description Stores the response and marks the key `COMPLETED`. The body is stored as JSON text, so a replay is exactly what was sent.
    * @returns true when an `IN_PROGRESS` key was completed

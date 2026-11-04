@@ -90,9 +90,11 @@ Nothing points back: the ledger knows nothing about withdrawals, and the schedul
 | `claimWithLease(tx, {key, scope, body}, seconds)` | → `NEW` \| `REPLAY` \| `IN_PROGRESS` \| `RESUME {resource}` | caller's: the same transaction inserts the deposit and calls `attachResource`, then commits before the PSP call | Two-phase deposit create only. Lease = `locked_until` on the database clock. A twin inside the lease gets `IN_PROGRESS`; once the lease is released or expired (the earlier attempt died), a retry gets `RESUME` with the record and a new lease |
 | `attachResource(tx, key, {type, id})` | → void | caller's | Records what a leased request created, so `RESUME` can return it |
 | `releaseLease(tx, key)` | → void | caller's | After an ambiguous provider failure, so a retry can resume at once |
-| `purgeOlderThan(days)` | → count | own | Scheduler, hourly |
+| `IdempotencyCleanupJob.purgeOlderThan(days)` | → count | own, one per batch of 1,000 | Worker role, every `IDEMPOTENCY_CLEANUP_INTERVAL_MINUTES` (60) with `IDEMPOTENCY_RETENTION_DAYS` (7). `FOR UPDATE SKIP LOCKED`: skips keys a request holds and lets every worker run it at once |
 
-What gets stored: 2xx responses and state-dependent 422s (`INSUFFICIENT_FUNDS`, `DAILY_LIMIT_EXCEEDED`). Not stored: 400s and pre-transaction 422s like `BELOW_MINIMUM` (recomputed identically), and 5xx (the transaction rolled back). The `@IdempotencyKey()` parameter decorator rejects a missing header with `IDEMPOTENCY_KEY_REQUIRED` (400).
+What gets stored: 2xx responses and state-dependent 422s (`INSUFFICIENT_FUNDS`, `DAILY_LIMIT_EXCEEDED`). Not stored: 400s and pre-transaction 422s like `BELOW_MINIMUM` (recomputed identically), and 5xx (the transaction rolled back).
+
+**HTTP edge (I2).** Every financial POST is declared with `@FinancialPost(path)` instead of `@Post`: its guard refuses a missing or empty `Idempotency-Key` with `IDEMPOTENCY_KEY_REQUIRED` (400) and a malformed one (not 1–255 printable ASCII) with `VALIDATION_ERROR` (400), before body validation. `@IdempotencyKey()` hands the checked key to the handler; `sendIdempotent(res, response, replayed)` sets the stored status and `Idempotent-Replayed: true` on a replay. Webhooks and reconciliation are marked `@IdempotencyExempt(reason)`. A test audits every POST route in every role and fails if one is neither.
 
 ### messaging
 **Owns:** `outbox`, `inbox`. **Depends on:** RabbitMQ.

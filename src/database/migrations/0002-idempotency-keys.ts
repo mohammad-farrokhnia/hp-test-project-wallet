@@ -5,7 +5,6 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * @description one row per Idempotency-Key, inserted in the same transaction as the effect and its stored response.
  * - `key` is global: the fingerprint covers the scope, so one key used on two routes is a reuse.
  * - `response_body` is `json`, not `jsonb`
- * - `locked_until` is the lease, used only by the two-phase deposit create.
  */
 export class IdempotencyKeys1793865600000 implements MigrationInterface {
   name = 'IdempotencyKeys1793865600000';

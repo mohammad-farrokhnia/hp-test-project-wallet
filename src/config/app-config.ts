@@ -23,6 +23,10 @@ export class AppConfig {
     usdtWithdrawFeeMicro: bigint;
   };
   readonly timing: { depositExpiryMinutes: number; reviewAfterMinutes: number };
+  readonly idempotency: {
+    retentionDays: number;
+    cleanupIntervalMinutes: number;
+  };
 
   constructor(e: Env) {
     this.role = e.APP_ROLE;
@@ -60,6 +64,10 @@ export class AppConfig {
     this.timing = {
       depositExpiryMinutes: e.DEPOSIT_EXPIRY_MINUTES,
       reviewAfterMinutes: e.REVIEW_AFTER_MINUTES,
+    };
+    this.idempotency = {
+      retentionDays: e.IDEMPOTENCY_RETENTION_DAYS,
+      cleanupIntervalMinutes: e.IDEMPOTENCY_CLEANUP_INTERVAL_MINUTES,
     };
     Object.freeze(this);
   }
