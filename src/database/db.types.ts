@@ -53,6 +53,28 @@ export interface Adjustments {
   user_id: string;
 }
 
+export interface Deposits {
+  amount_rial: Int8;
+  check_attempts: Generated<number>;
+  completed_at: Timestamp | null;
+  created_at: Generated<Timestamp>;
+  credited_rial: Int8 | null;
+  expires_at: Timestamp;
+  failure_reason: string | null;
+  id: string;
+  needs_review: Generated<boolean>;
+  next_check_at: Timestamp | null;
+  paid_seen_at: Timestamp | null;
+  payment_url: string | null;
+  psp_ref_id: string | null;
+  psp_status: string | null;
+  psp_token: string | null;
+  review_reason: string | null;
+  status: string;
+  updated_at: Generated<Timestamp>;
+  user_id: string;
+}
+
 export interface IdempotencyKeys {
   completed_at: Timestamp | null;
   created_at: Generated<Timestamp>;
@@ -168,6 +190,7 @@ export interface Withdrawals {
 export interface DB {
   accounts: Accounts;
   adjustments: Adjustments;
+  deposits: Deposits;
   idempotency_keys: IdempotencyKeys;
   inbound_events: InboundEvents;
   journals: Journals;
