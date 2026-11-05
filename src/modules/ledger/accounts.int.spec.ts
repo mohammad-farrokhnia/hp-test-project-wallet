@@ -63,7 +63,7 @@ describeDb('LedgerService.ensureUserAccounts (real PostgreSQL)', () => {
     // this database and advance that sequence while this one runs.
     const versions = () =>
       ds.query<{ id: string; xmin: string }[]>(
-        'SELECT id::text, xmin::text FROM accounts WHERE user_id = $1 ORDER BY id',
+        'SELECT id::text, xmin::text FROM accounts WHERE user_id = $1 ORDER BY accounts.id',
         [userId],
       );
     const first = await runner.run((tx) =>

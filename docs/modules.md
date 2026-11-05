@@ -157,15 +157,19 @@ What gets stored: 2xx responses and state-dependent 422s (`INSUFFICIENT_FUNDS`, 
 | `WithdrawalSyncHandler` | Consumer of `job.withdrawal.sync` |
 | `WithdrawalDueWork` | Implements the scheduler's `DueWorkSource` |
 
+**Body:** `{userId, currency: "IRT" | "USDT", amount, destination}`; the destination type follows from the currency (IRT → Sheba IBAN, spaces/lowercase accepted and normalised; USDT → TRC20).
+
 **`request(cmd, key)`**, one transaction (ADR-1). Before the transaction: DTO validation (400), destination validation (400 `INVALID_DESTINATION`), minimum (422 `BELOW_MINIMUM`). Then:
 1. `idempotency.claim` (replay → return the stored response).
 2. `ledger.ensureUserAccounts` + `lockUserAccounts`.
 3. `available < amount + fee` → stored 422 `INSUFFICIENT_FUNDS`.
 4. `DailyLimitRepository.reserve(tx, userId, tehranDay, limitAmount)` (creates and locks the row) → over the cap: stored 422 `DAILY_LIMIT_EXCEEDED`.
-5. Insert the withdrawal (`PENDING`, `next_check_at = now + 30 s` as a safety net), `ledger.post(WITHDRAWAL_FREEZE)`, transition row, `outbox.add(job.withdrawal.submit)`.
+5. Insert the withdrawal (`PENDING`, `next_check_at = now + WITHDRAWAL_SAFETY_NET_SECONDS` (30 s) as a safety net), `ledger.post(WITHDRAWAL_FREEZE)` (amount + fee, AVAILABLE → FROZEN), `outbox.add(job.withdrawal.submit)`. *(The transition row waits for a `state_transitions` migration, which no task has created yet.)*
 6. `idempotency.complete(201 {withdrawalId, status: "PENDING"})`, then commit.
 
-**`get(id)`:** `200 {withdrawalId, status, userId, currency, amount, fee, destination (masked), failureReason, returnedAt, returnReason, needsReview, createdAt, updatedAt}`; unknown → 404 `NOT_FOUND`.
+**`get(id)`:** `200 {withdrawalId, status, userId, currency, amount, fee, destination (masked: first and last 4 characters), failureReason, returnedAt, returnReason, needsReview, createdAt, updatedAt}`; unknown or malformed id → 404 `NOT_FOUND`.
+
+**Wiring:** `WithdrawalModule` (service, repositories, policies; every role) and `WithdrawalApiModule` (controller; api role only). `WithdrawalService.openTotals` is bound as operations' `OpenWithdrawalTotals`, so `/internal/invariants` compares FROZEN with real open withdrawals.
 
 **`WithdrawalSubmitHandler`:**
 1. Transaction 1: lock the withdrawal row (`FOR UPDATE SKIP LOCKED`; locked means another worker has it, so ack and stop). Continue only if `PENDING`, or `SUBMITTING` with no in-flight attempt. Move to `SUBMITTING`, open attempt n, set `next_check_at = now + 30 s`. Commit.

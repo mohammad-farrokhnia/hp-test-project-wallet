@@ -21,6 +21,7 @@ import {
 import { OperationsModule } from './modules/operations';
 import { SchedulerModule } from './modules/scheduler';
 import { WalletModule } from './modules/wallet';
+import { WithdrawalApiModule } from './modules/withdrawal';
 
 export type AppRole = Env['APP_ROLE'];
 
@@ -40,6 +41,7 @@ const API_MODULES: Type[] = [
   GuardsModule,
   OperationsModule,
   WalletModule,
+  WithdrawalApiModule,
 ];
 
 const WORKER_MODULES: (Type | DynamicModule)[] = [

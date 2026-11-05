@@ -31,6 +31,7 @@ const API_CONTROLLERS = [
   'HealthController',
   'InvariantsController',
   'WalletController',
+  'WithdrawalController',
 ];
 
 describe('AppModule.forRole', () => {

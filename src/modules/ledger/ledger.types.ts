@@ -28,6 +28,15 @@ export interface UserAccountIds {
   readonly debt: bigint;
 }
 
+/** A user's three accounts in one currency, read under their row locks. */
+export interface LockedUserAccounts {
+  readonly ids: UserAccountIds;
+  readonly available: Money;
+  readonly frozen: Money;
+  /** Zero or negative. */
+  readonly debt: Money;
+}
+
 /** One user's balances in one currency. `debt` is zero or negative, as stored. */
 export interface WalletBalances {
   readonly available: Money;

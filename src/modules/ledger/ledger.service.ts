@@ -19,6 +19,7 @@ import {
   CreditUserInput,
   FrozenBalance,
   HistoryPage,
+  LockedUserAccounts,
   PostResult,
   UserAccountIds,
   WalletBalances,
@@ -65,6 +66,40 @@ export class LedgerService {
       );
     }
     return created;
+  }
+
+  /**
+   * @function lockUserAccounts
+   * @description Creates the user's accounts on first use, then locks all three in id order and reads their balances, so a funds check sees the newest committed values and holds them until commit.
+   * `post` on the same rows later does not wait.
+   * @param tx - the caller's transaction
+   * @param userId - the wallet owner
+   * @param currency - `IRR` or `USDT`
+   * @returns ids and locked balances
+   */
+  async lockUserAccounts(
+    tx: Tx,
+    userId: string,
+    currency: CurrencyCode,
+  ): Promise<LockedUserAccounts> {
+    const ids = await this.ensureUserAccounts(tx, userId, currency);
+    const locked = await this.accounts.lockAccountsById(tx, [
+      ids.available,
+      ids.frozen,
+      ids.debt,
+    ]);
+    const balance = (id: bigint) => {
+      const a = locked.get(id);
+      if (!a)
+        throw new LedgerError('ACCOUNT_NOT_FOUND', `account ${id} vanished`);
+      return a.balance;
+    };
+    return {
+      ids,
+      available: balance(ids.available),
+      frozen: balance(ids.frozen),
+      debt: balance(ids.debt),
+    };
   }
 
   /**
