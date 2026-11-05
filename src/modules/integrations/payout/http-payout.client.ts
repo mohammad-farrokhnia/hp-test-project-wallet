@@ -4,6 +4,7 @@ import {
   parseProviderAmount,
   toProviderAmount,
 } from '../../../common/money';
+import { callJson, describeFailure, HttpAnswer } from '../http/json-call';
 import {
   LookupOutcome,
   PayoutClient,
@@ -21,12 +22,6 @@ const STATUSES: readonly TransferStatus[] = [
   'FAILED',
   'RETURNED',
 ];
-
-/** The answer the payout service gave to a create, when it gave one. */
-interface Answer {
-  readonly status: number;
-  readonly body: unknown;
-}
 
 /**
  * @class HttpPayoutClient
@@ -58,11 +53,11 @@ export class HttpPayoutClient implements PayoutClient {
 
   async submit(request: PayoutRequest): Promise<SubmitOutcome> {
     const requestBody = this.requestBody(request);
-    let answer: Answer;
+    let answer: HttpAnswer;
     try {
       answer = await this.call('POST', '/payout/transfers', requestBody);
     } catch (err) {
-      const error = describe(err);
+      const error = describeFailure(err);
       this.logger.warn(`submit ${request.requestId}: ${error}; ambiguous`);
       return {
         kind: 'AMBIGUOUS',
@@ -108,14 +103,14 @@ export class HttpPayoutClient implements PayoutClient {
   }
 
   async getTransfer(requestId: string): Promise<LookupOutcome> {
-    let answer: Answer;
+    let answer: HttpAnswer;
     try {
       answer = await this.call(
         'GET',
         `/payout/transfers/${encodeURIComponent(requestId)}`,
       );
     } catch (err) {
-      return { kind: 'UNAVAILABLE', reason: describe(err) };
+      return { kind: 'UNAVAILABLE', reason: describeFailure(err) };
     }
     if (answer.status === 404) return { kind: 'NOT_FOUND' };
     if (answer.status !== 200) {
@@ -134,26 +129,12 @@ export class HttpPayoutClient implements PayoutClient {
       : { kind: 'UNAVAILABLE', reason: 'unreadable 200 body' };
   }
 
-  private async call(
+  private call(
     method: 'GET' | 'POST',
     path: string,
     body?: unknown,
-  ): Promise<Answer> {
-    const res = await fetch(`${this.baseUrl.replace(/\/$/, '')}${path}`, {
-      method,
-      headers:
-        body === undefined ? undefined : { 'content-type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(this.timeoutMs),
-    });
-    const text = await res.text();
-    let parsed: unknown = text;
-    try {
-      parsed = text === '' ? null : JSON.parse(text);
-    } catch {
-      // keep the raw text: an unreadable body is evidence too
-    }
-    return { status: res.status, body: parsed };
+  ): Promise<HttpAnswer> {
+    return callJson(this.baseUrl, this.timeoutMs, method, path, body);
   }
 }
 
@@ -196,16 +177,4 @@ function compare(request: PayoutRequest, s: TransferSnapshot): ReplayField[] {
 function errorCode(body: unknown): string | null {
   const e = (body as { error?: unknown } | null)?.error;
   return typeof e === 'string' ? e : null;
-}
-
-/** By shape, not `instanceof`: fetch's errors may come from another realm. */
-function describe(err: unknown): string {
-  if (typeof err !== 'object' || err === null) return 'unknown error';
-  const e = err as {
-    name?: string;
-    message?: string;
-    cause?: { code?: string; message?: string };
-  };
-  if (e.name === 'TimeoutError' || e.name === 'AbortError') return 'timeout';
-  return e.cause?.code ?? e.cause?.message ?? e.message ?? 'unknown error';
 }

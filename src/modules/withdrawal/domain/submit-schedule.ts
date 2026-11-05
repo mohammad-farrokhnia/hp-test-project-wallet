@@ -1,5 +1,3 @@
-/** When to look at a withdrawal again after a submit. */
-
 /** the provider accepted it; check its progress soon. */
 export const AFTER_ACCEPTED_SECONDS = 10;
 

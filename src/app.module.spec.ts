@@ -28,6 +28,7 @@ async function bootRole(role: AppRole) {
 /** Every controller the api role serves; a new endpoint is added here on purpose. */
 const API_CONTROLLERS = [
   'AdjustmentsController',
+  'DepositController',
   'HealthController',
   'InvariantsController',
   'PayoutWebhookController',

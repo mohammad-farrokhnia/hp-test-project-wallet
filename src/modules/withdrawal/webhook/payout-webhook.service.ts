@@ -1,12 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AppError } from '../../../common/errors';
+import { isUuid } from '../../../common/ids';
 import { TransactionRunner } from '../../../database/transaction-runner';
 import { InboundEvents } from '../../integrations/inbound-events';
 import { WebhookVerifier } from '../../integrations/payout';
 import { JOBS_EXCHANGE, OutboxService } from '../../messaging';
 import { WithdrawalsRepository } from '../repositories/withdrawals.repository';
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Marks a sync job started by a signed webhook: it pulls even for a final withdrawal. */
 export const WEBHOOK_TRIGGER = 'WEBHOOK';
@@ -77,7 +76,7 @@ export class PayoutWebhookService {
     return this.runner.run(async (tx) => {
       const known =
         requestId !== null &&
-        UUID.test(requestId) &&
+        isUuid(requestId) &&
         (await this.withdrawals.scheduleCheck(tx, requestId, 0));
       const outcome = known ? 'ACCEPTED' : 'UNKNOWN_REFERENCE';
       await this.inbound.record(tx, { ...evidence, outcome });

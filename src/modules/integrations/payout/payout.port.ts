@@ -18,7 +18,6 @@ export interface TransferSnapshot {
   readonly requestId: string;
   readonly trackingId: string | null;
   readonly status: TransferStatus;
-  /** e.g. `INVALID_IBAN`, `ACCOUNT_CLOSED` */
   readonly reason: string | null;
   readonly amount: Money;
   readonly destination: string;

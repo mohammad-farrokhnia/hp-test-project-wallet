@@ -11,6 +11,7 @@ import {
   IdempotencyCleanupModule,
   IdempotencyModule,
 } from './modules/idempotency';
+import { DepositApiModule } from './modules/deposit';
 import { LedgerModule } from './modules/ledger';
 import {
   JobsModule,
@@ -48,6 +49,7 @@ const API_MODULES: Type[] = [
   GuardsModule,
   OperationsModule,
   WalletModule,
+  DepositApiModule,
   WithdrawalApiModule,
 ];
 

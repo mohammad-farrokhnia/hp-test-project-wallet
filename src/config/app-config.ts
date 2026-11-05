@@ -28,6 +28,8 @@ export class AppConfig {
   };
   readonly timing: {
     depositExpiryMinutes: number;
+    depositCreateLeaseSeconds: number;
+    depositFirstCheckSeconds: number;
     reviewAfterMinutes: number;
     withdrawalSafetyNetSeconds: number;
     withdrawalSubmitLeaseSeconds: number;
@@ -97,6 +99,8 @@ export class AppConfig {
     };
     this.timing = {
       depositExpiryMinutes: e.DEPOSIT_EXPIRY_MINUTES,
+      depositCreateLeaseSeconds: e.DEPOSIT_CREATE_LEASE_SECONDS,
+      depositFirstCheckSeconds: e.DEPOSIT_FIRST_CHECK_SECONDS,
       reviewAfterMinutes: e.REVIEW_AFTER_MINUTES,
       withdrawalSafetyNetSeconds: e.WITHDRAWAL_SAFETY_NET_SECONDS,
       withdrawalSubmitLeaseSeconds: e.WITHDRAWAL_SUBMIT_LEASE_SECONDS,
