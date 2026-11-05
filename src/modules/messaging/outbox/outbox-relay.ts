@@ -1,18 +1,11 @@
 import { Logger } from '@nestjs/common';
 import { performance } from 'node:perf_hooks';
 import { TransactionRunner } from '../../../database/transaction-runner';
-import { OutgoingMessage } from '../rabbit/rabbit-publisher';
+import { Envelope } from '../envelope';
+import type { OutgoingMessage, Publisher } from '../rabbit/rabbit-publisher';
 import { ClaimedRow, OutboxRepository } from './outbox.repository';
 
-/** What travels on the wire: ids only, so handlers reload state from the database. */
-export interface Envelope {
-  readonly messageId: string;
-  readonly type: string;
-  readonly aggregateType: string;
-  readonly aggregateId: string;
-  readonly occurredAt: string;
-  readonly payload: Readonly<Record<string, string>>;
-}
+export type { Publisher };
 
 export function toEnvelope(row: ClaimedRow): OutgoingMessage {
   const body: Envelope = {
@@ -31,19 +24,10 @@ export function toEnvelope(row: ClaimedRow): OutgoingMessage {
   };
 }
 
-/** What the relay needs from a publisher. */
-export interface Publisher {
-  publish(message: OutgoingMessage): Promise<void>;
-  /** The longest one `publish` can take. */
-  maxPublishMs(): number;
-}
-
 export interface RelayOptions {
   readonly batchSize: number;
-  /** Pause after a round that found less than a full batch. */
   readonly intervalMs: number;
   readonly claimSeconds: number;
-  /** Monotonic milliseconds; injectable for tests. */
   readonly now?: () => number;
 }
 

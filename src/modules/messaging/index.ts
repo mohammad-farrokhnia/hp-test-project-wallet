@@ -1,7 +1,11 @@
 export * from './messaging.module';
 export * from './outbox/outbox.service';
+export { JobsModule } from './consumer/jobs.module';
+export { ATTEMPT_HEADER, JobConsumer } from './consumer/job-consumer';
+export type { JobContext, JobHandler } from './consumer/job-consumer';
 export { OutboxRelayModule } from './outbox/outbox-relay.module';
 export { RabbitModule } from './rabbit/rabbit.module';
 export { RabbitPublisher, PublishError } from './rabbit/rabbit-publisher';
-export type { OutgoingMessage } from './rabbit/rabbit-publisher';
+export type { OutgoingMessage, Publisher } from './rabbit/rabbit-publisher';
+export * from './envelope';
 export * from './topology';

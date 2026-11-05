@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import {
+  Channel,
   ChannelModel,
   connect,
   ConfirmChannel,
@@ -58,6 +59,19 @@ export class RabbitConnection implements ConfirmChannelSource {
     );
     model.on('error', (err: Error) => this.logger.error(describe(err)));
     this.model = model;
+  }
+
+  /**
+   * @function createChannel
+   * @description A new plain channel, for a consumer. Waits while the broker is down; a reconnect closes it, and its owner opens another.
+   */
+  createChannel(): Promise<Channel> {
+    return this.requireModel().createChannel();
+  }
+
+  /** Called after every successful (re)connect, topology declared. */
+  onConnect(listener: (model: ChannelModel) => void): void {
+    this.requireModel().on('connect', listener);
   }
 
   /** Resolves once connected and the topology is declared. */

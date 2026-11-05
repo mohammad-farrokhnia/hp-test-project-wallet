@@ -121,6 +121,14 @@ npm run test:perf
 
 It seeds a user with 1,000,000 postings inside a transaction that is rolled back, walks to page 1,000 of `GET /wallets/:userId/ledger` through real cursors, and fails if that page takes 50 ms or more, or if its plan sorts or scans instead of walking an index.
 
+**RabbitMQ restart check (restarts the compose broker, so it runs alone):**
+
+```bash
+npm run test:chaos
+```
+
+A sweeper and a job consumer run against the real broker; one job is handled, `docker compose restart rabbitmq` runs, and a row that comes due meanwhile must still be queued and handled once the broker is back.
+
 **Or run everything inside Docker**, with no local setup (uses `wallet_test` in the compose Postgres):
 
 ```bash

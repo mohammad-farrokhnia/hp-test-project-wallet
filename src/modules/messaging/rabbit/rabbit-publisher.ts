@@ -9,6 +9,12 @@ export interface OutgoingMessage {
   readonly routingKey: string;
   readonly messageId: string;
   readonly body: unknown;
+  readonly headers?: Readonly<Record<string, string | number>>;
+}
+
+export interface Publisher {
+  publish(message: OutgoingMessage): Promise<void>;
+  maxPublishMs(): number;
 }
 
 export interface PublisherOptions {
@@ -30,9 +36,11 @@ export class PublishError extends Error {
 
 /**
  * @class RabbitPublisher
- * @description Publishes with publisher confirms (ADR-2): `publish` resolves only once the broker has taken responsibility for the message. A nack, a missing confirm or a lost channel is retried; a retry may deliver twice, which is fine, because every consumer is idempotent and the message id stays the same. Messages are persistent and `mandatory`, so one no queue would receive comes back as `UNROUTABLE` instead of vanishing.
+ * @description Publishes with publisher confirms: `publish` resolves only once the broker has taken responsibility for the message.
+ * A nack, a missing confirm or a lost channel is retried; a retry may deliver twice, which is fine, because every consumer is idempotent and the message id stays the same.
+ * Messages are persistent and `mandatory`, so one no queue would receive comes back as `UNROUTABLE` instead of vanishing.
  */
-export class RabbitPublisher {
+export class RabbitPublisher implements Publisher {
   private readonly logger = new Logger(RabbitPublisher.name);
 
   constructor(
@@ -125,6 +133,7 @@ export class RabbitPublisher {
               mandatory: true,
               contentType: 'application/json',
               messageId: m.messageId,
+              headers: m.headers,
               timestamp: Math.floor(Date.now() / 1000),
             },
             (err: unknown) => {

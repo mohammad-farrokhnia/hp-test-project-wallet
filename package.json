@@ -16,6 +16,7 @@
     "db:types": "node scripts/db-types.js",
     "test": "jest",
     "test:perf": "PERF=1 jest --runInBand src/modules/wallet/history.perf",
+    "test:chaos": "CHAOS=1 jest --runInBand src/modules/scheduler/broker-restart",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",

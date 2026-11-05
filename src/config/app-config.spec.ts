@@ -14,6 +14,16 @@ describe('loadConfig', () => {
       intervalMs: 500,
       claimSeconds: 30,
     });
+    expect(c.jobs).toEqual({
+      prefetch: 10,
+      maxAttempts: 5,
+      retryBackoffMs: 1000,
+    });
+    expect(c.sweeper).toEqual({
+      intervalMs: 5000,
+      batchSize: 100,
+      bumpSeconds: 30,
+    });
     expect(c.idempotency).toEqual({
       retentionDays: 7,
       cleanupIntervalMinutes: 60,

@@ -61,6 +61,14 @@ export const envSchema = z.object({
   OUTBOX_RELAY_INTERVAL_MS: int(500),
   OUTBOX_CLAIM_SECONDS: int(30),
 
+  JOB_PREFETCH: z.coerce.number().int().min(1).max(1000).default(10),
+  JOB_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(100).default(5),
+  JOB_RETRY_BACKOFF_MS: z.coerce.number().int().min(0).default(1000),
+
+  SWEEPER_INTERVAL_MS: int(5000),
+  SWEEPER_BATCH_SIZE: z.coerce.number().int().min(1).max(1000).default(100),
+  SWEEPER_BUMP_SECONDS: int(30),
+
   IDEMPOTENCY_RETENTION_DAYS: int(7),
   IDEMPOTENCY_CLEANUP_INTERVAL_MINUTES: int(60),
 });

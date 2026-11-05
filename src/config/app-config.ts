@@ -32,6 +32,16 @@ export class AppConfig {
     intervalMs: number;
     claimSeconds: number;
   };
+  readonly jobs: {
+    prefetch: number;
+    maxAttempts: number;
+    retryBackoffMs: number;
+  };
+  readonly sweeper: {
+    intervalMs: number;
+    batchSize: number;
+    bumpSeconds: number;
+  };
   readonly idempotency: {
     retentionDays: number;
     cleanupIntervalMinutes: number;
@@ -87,6 +97,16 @@ export class AppConfig {
       batchSize: e.OUTBOX_RELAY_BATCH_SIZE,
       intervalMs: e.OUTBOX_RELAY_INTERVAL_MS,
       claimSeconds: e.OUTBOX_CLAIM_SECONDS,
+    };
+    this.jobs = {
+      prefetch: e.JOB_PREFETCH,
+      maxAttempts: e.JOB_MAX_ATTEMPTS,
+      retryBackoffMs: e.JOB_RETRY_BACKOFF_MS,
+    };
+    this.sweeper = {
+      intervalMs: e.SWEEPER_INTERVAL_MS,
+      batchSize: e.SWEEPER_BATCH_SIZE,
+      bumpSeconds: e.SWEEPER_BUMP_SECONDS,
     };
     this.idempotency = {
       retentionDays: e.IDEMPOTENCY_RETENTION_DAYS,

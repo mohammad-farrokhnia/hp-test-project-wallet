@@ -106,7 +106,7 @@ What gets stored: 2xx responses and state-dependent 422s (`INSUFFICIENT_FUNDS`, 
 | `RabbitTopology` (`topology.ts`) | The layout below as data; `declareTopology` runs on every (re)connect. Same arguments are a no-op; changed arguments fail with PRECONDITION_FAILED instead of silently keeping the old queue |
 | `RabbitConnection` (worker) | One amqplib recovering connection: boot never waits for the broker, reconnects with backoff (200 ms to 30 s), redeclares the topology after each connect, reopens the confirm channel after it closes. Host and port from `RABBITMQ_HOST`/`RABBITMQ_PORT` |
 | `RabbitPublisher` (worker) | Publisher confirms: resolves only on the broker's ack. Persistent, `mandatory`, `messageId`. A nack, no confirm within `RABBITMQ_PUBLISH_TIMEOUT_MS` (5 s) or a lost channel is retried `RABBITMQ_PUBLISH_RETRIES` (3) times with the same message id; an unroutable message fails at once (`UNROUTABLE`) |
-| `JobConsumer` base | prefetch 10; parses the envelope; calls the handler; **acks only after the handler's transaction commits**. A thrown error nacks with requeue; past the queue's delivery limit (5) the message dead-letters to `job.dead` and is logged. The row's `next_check_at` makes the sweeper retry later regardless. **Measured on RabbitMQ 4 (M2): a `nack` with requeue does not count toward the delivery limit; only a delivery lost without an ack does (consumer or channel died).** So M4 must count failures itself (e.g. `x-delivery-count` / a retry header) or nack without requeue into a retry route, or a poison message cycles forever |
+| `JobConsumer` (worker; one per `JobHandler`, listed in `JobsModule.register`) | Prefetch `JOB_PREFETCH` (10); parses the envelope; calls `handler.handle(envelope, {attempt})`; **acks only after it returns, i.e. after the handler's transaction committed**. RabbitMQ 4 does not count a `nack` with requeue toward the delivery limit (measured in M2), so attempts are counted in an `x-attempt` header: on a throw below `JOB_MAX_ATTEMPTS` (5) it waits `JOB_RETRY_BACKOFF_MS × attempt`, republishes a copy with `x-attempt + 1` (confirmed, same message id) and acks the original; at the limit it nacks without requeue, so the broker dead-letters it to `job.dead`. A body that is not an envelope goes to `job.dead` at once. A worker that dies mid-job never acked: the job comes back, and those lost deliveries count toward the queue's own limit (5), so that path also ends in `job.dead`. Re-subscribes whenever its channel closes (reconnect, broker cancel). `stop()` waits up to 10 s for jobs in progress; anything still running is redelivered. The row's `next_check_at` makes the sweeper retry later regardless |
 | `InboxService.markProcessed(tx, consumer, messageId)` | Bonus: returns false if already processed |
 
 **Topology.**
@@ -236,7 +236,9 @@ Next, `PspClient.createPayment(amountRial, orderId = depositId, callbackUrl)`. T
 | `POST /transfers` | One transaction: claim key → reject self-transfer (422 `SAME_USER`) → lock both users' accounts in id order → check sender available → `ledger.post(TRANSFER: sender AVAILABLE −x + creditLines(receiver))` → 201 `{transferId}` |
 
 ### scheduler (worker role)
-**Owns:** nothing. Calls the `DueWorkSource` implementations every 5 s.
+**Owns:** nothing. Calls the `DueWorkSource` implementations (listed in `SchedulerModule.register`) every `SWEEPER_INTERVAL_MS` (5 s), at once again while a source returns a full batch (`SWEEPER_BATCH_SIZE`, 100).
+
+**`DueWorkSource.claimDue(tx, limit, bumpSeconds)` contract: bump first.** One statement takes due rows `FOR UPDATE SKIP LOCKED`, sets `next_check_at = now() + SWEEPER_BUMP_SECONDS` (30), and returns them; the sweeper commits that, then publishes. So a row is queued once per bump: a parallel sweeper skips it while locked and finds it not due once committed. A publish only starts if, at its worst case, it ends before the bump does (as in the outbox relay), and boot fails if the bump is too short for that.
 
 | Source | Claims (`UPDATE … WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED LIMIT 100) RETURNING`) | Publishes |
 |---|---|---|
@@ -248,7 +250,7 @@ Next, `PspClient.createPayment(amountRial, orderId = depositId, callbackUrl)`. T
 | Cleanup | hourly | idempotency keys (7 d), published outbox (3 d), inbound events (30 d) |
 | Invariants | every 5 min | `operations.InvariantsService.check()`; logs an alert on any violation |
 
-The sweeper publishes directly to RabbitMQ rather than through the outbox. Its work is re-derivable from rows: if a publish fails, the next sweep finds the row again.
+The sweeper publishes directly to RabbitMQ rather than through the outbox. Its work is re-derivable from rows: if a publish fails, or RabbitMQ restarts and loses the queue, the row is due again after the bump and the next sweep queues it (tested by dropping the connection and purging the queue, and with a real `docker compose restart rabbitmq` in `npm run test:chaos`).
 
 ## Integrations (ports and adapters)
 

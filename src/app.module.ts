@@ -13,11 +13,13 @@ import {
 } from './modules/idempotency';
 import { LedgerModule } from './modules/ledger';
 import {
+  JobsModule,
   MessagingModule,
   OutboxRelayModule,
   RabbitModule,
 } from './modules/messaging';
 import { OperationsModule } from './modules/operations';
+import { SchedulerModule } from './modules/scheduler';
 import { WalletModule } from './modules/wallet';
 
 export type AppRole = Env['APP_ROLE'];
@@ -40,10 +42,12 @@ const API_MODULES: Type[] = [
   WalletModule,
 ];
 
-const WORKER_MODULES: Type[] = [
+const WORKER_MODULES: (Type | DynamicModule)[] = [
   IdempotencyCleanupModule,
   RabbitModule,
   OutboxRelayModule,
+  JobsModule.register({ handlers: [] }),
+  SchedulerModule.register({ sources: [] }),
 ];
 
 /**

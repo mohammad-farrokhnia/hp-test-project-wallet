@@ -9,7 +9,8 @@ import { TransactionRunner } from '../../../database/transaction-runner';
 import { RabbitConnection } from '../rabbit/rabbit-connection';
 import { OutgoingMessage, RabbitPublisher } from '../rabbit/rabbit-publisher';
 import { buildTopology, JOBS_EXCHANGE } from '../topology';
-import { Envelope, OutboxRelay, Publisher, RelayOptions } from './outbox-relay';
+import { Envelope } from '../envelope';
+import { OutboxRelay, Publisher, RelayOptions } from './outbox-relay';
 import { OutboxRepository } from './outbox.repository';
 
 /** Records every publish; `behaviour` decides per message. */
