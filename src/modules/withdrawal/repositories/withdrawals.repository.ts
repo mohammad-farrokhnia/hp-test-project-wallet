@@ -20,6 +20,18 @@ export interface NewWithdrawal {
   readonly nextCheckInSeconds: number;
 }
 
+export interface SubmitRow {
+  readonly id: string;
+  readonly status: WithdrawalStatus;
+  readonly submitAttempts: number;
+  readonly amount: Money;
+  readonly destinationType: DestinationType;
+  readonly destination: string;
+}
+
+const inSeconds = (seconds: number) =>
+  sql<Date>`now() + make_interval(secs => ${seconds})`;
+
 export interface WithdrawalRecord {
   readonly id: string;
   readonly userId: string;
@@ -87,8 +99,119 @@ export class WithdrawalsRepository {
   }
 
   /**
+   * @function lockForSubmit
+   * @description Locks the withdrawal for the submit job with `SKIP LOCKED`:
+   * a row another worker holds is skipped, not waited for.
+   * @returns what a submit needs, or `null` when unknown or locked by someone else
+   */
+  async lockForSubmit(tx: Tx, id: string): Promise<SubmitRow | null> {
+    const r = await db(tx)
+      .selectFrom('withdrawals')
+      .select([
+        'id',
+        'status',
+        'submit_attempts',
+        'currency',
+        'amount_minor',
+        'destination_type',
+        'destination',
+      ])
+      .where('id', '=', id)
+      .forUpdate()
+      .skipLocked()
+      .executeTakeFirst();
+    if (!r) return null;
+    return {
+      id: r.id,
+      status: r.status as WithdrawalStatus,
+      submitAttempts: r.submit_attempts,
+      amount: Money.of(r.currency as CurrencyCode, BigInt(r.amount_minor)),
+      destinationType: r.destination_type as DestinationType,
+      destination: r.destination,
+    };
+  }
+
+  /** Locks the withdrawal, waiting if needed, and reads its status. */
+  async lockStatus(tx: Tx, id: string): Promise<WithdrawalStatus | null> {
+    const r = await db(tx)
+      .selectFrom('withdrawals')
+      .select('status')
+      .where('id', '=', id)
+      .forUpdate()
+      .executeTakeFirst();
+    return r ? (r.status as WithdrawalStatus) : null;
+  }
+
+  /** SUBMITTING, attempt counted, `submitted_at` on the first, next check after the lease. */
+  async startSubmitting(
+    tx: Tx,
+    id: string,
+    attemptNo: number,
+    leaseSeconds: number,
+  ): Promise<void> {
+    await db(tx)
+      .updateTable('withdrawals')
+      .set({
+        status: 'SUBMITTING',
+        submit_attempts: attemptNo,
+        submitted_at: sql<Date>`coalesce(submitted_at, now())`,
+        next_check_at: inSeconds(leaseSeconds),
+      })
+      .where('id', '=', id)
+      .where('status', 'in', ['PENDING', 'SUBMITTING'])
+      .execute();
+  }
+
+  /** the provider has it. Compare-and-set from SUBMITTING. */
+  async markProcessing(
+    tx: Tx,
+    id: string,
+    provider: { status: string; trackingId: string | null },
+    nextCheckSeconds: number,
+  ): Promise<void> {
+    await db(tx)
+      .updateTable('withdrawals')
+      .set({
+        status: 'PROCESSING',
+        provider_status: provider.status,
+        provider_tracking_id: provider.trackingId,
+        next_check_at: inSeconds(nextCheckSeconds),
+      })
+      .where('id', '=', id)
+      .where('status', '=', 'SUBMITTING')
+      .execute();
+  }
+
+  /** a replay with other fields. Stays SUBMITTING, money frozen, flagged for a person. */
+  async flagReplayMismatch(
+    tx: Tx,
+    id: string,
+    nextCheckSeconds: number,
+  ): Promise<void> {
+    await db(tx)
+      .updateTable('withdrawals')
+      .set({
+        needs_review: true,
+        review_reason: 'REPLAY_MISMATCH',
+        next_check_at: inSeconds(nextCheckSeconds),
+      })
+      .where('id', '=', id)
+      .where('status', '=', 'SUBMITTING')
+      .execute();
+  }
+
+  /** Stays as it is; the sweeper looks again after `seconds` (0 = now). */
+  async scheduleCheck(tx: Tx, id: string, seconds: number): Promise<void> {
+    await db(tx)
+      .updateTable('withdrawals')
+      .set({ next_check_at: inSeconds(seconds) })
+      .where('id', '=', id)
+      .execute();
+  }
+
+  /**
    * @function openTotals
-   * @description Σ (amount + fee) of non-final withdrawals per user and currency: what FROZEN must hold.
+   * @description Σ (amount + fee) of non-final withdrawals per user and currency: what FROZEN must hold (ADR-7).
    */
   async openTotals(tx: Tx): Promise<{ userId: string; amount: Money }[]> {
     const rows = await db(tx)

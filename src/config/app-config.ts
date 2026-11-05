@@ -30,6 +30,7 @@ export class AppConfig {
     depositExpiryMinutes: number;
     reviewAfterMinutes: number;
     withdrawalSafetyNetSeconds: number;
+    withdrawalSubmitLeaseSeconds: number;
   };
   readonly outbox: {
     batchSize: number;
@@ -97,6 +98,7 @@ export class AppConfig {
       depositExpiryMinutes: e.DEPOSIT_EXPIRY_MINUTES,
       reviewAfterMinutes: e.REVIEW_AFTER_MINUTES,
       withdrawalSafetyNetSeconds: e.WITHDRAWAL_SAFETY_NET_SECONDS,
+      withdrawalSubmitLeaseSeconds: e.WITHDRAWAL_SUBMIT_LEASE_SECONDS,
     };
     this.outbox = {
       batchSize: e.OUTBOX_RELAY_BATCH_SIZE,

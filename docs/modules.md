@@ -172,7 +172,7 @@ What gets stored: 2xx responses and state-dependent 422s (`INSUFFICIENT_FUNDS`, 
 **Wiring:** `WithdrawalModule` (service, repositories, policies; every role) and `WithdrawalApiModule` (controller; api role only). `WithdrawalService.openTotals` is bound as operations' `OpenWithdrawalTotals`, so `/internal/invariants` compares FROZEN with real open withdrawals.
 
 **`WithdrawalSubmitHandler`:**
-1. Transaction 1: lock the withdrawal row (`FOR UPDATE SKIP LOCKED`; locked means another worker has it, so ack and stop). Continue only if `PENDING`, or `SUBMITTING` with no in-flight attempt. Move to `SUBMITTING`, open attempt n, set `next_check_at = now + 30 s`. Commit.
+1. Transaction 1: lock the withdrawal row (`FOR UPDATE SKIP LOCKED`; locked means another worker has it, so ack and stop). Continue only if `PENDING`, or `SUBMITTING` with no in-flight attempt (an unfinished attempt younger than `WITHDRAWAL_SUBMIT_LEASE_SECONDS`, 30 s; older ones belong to a dead process, and resending the same requestId is safe, PAY-02). Move to `SUBMITTING`, open attempt n with the exact request body, set `next_check_at = now + lease`. Commit. Boot fails if the lease does not outlast `HTTP_TIMEOUT_MS`.
 2. `PayoutClient.submit` (10 s timeout).
 3. Transaction 2: close the attempt with its outcome, then by outcome:
    - `ACCEPTED`, or `REPLAYED` with matching fields → `PROCESSING`.
@@ -266,8 +266,8 @@ Services depend on the port (an injection token); the HTTP adapter is the only c
 | | `getPayment(token)` | `{status: INIT \| PAID \| VERIFIED \| FAILED \| REVERSED, amount, refId}` · `NOT_FOUND` · `UNAVAILABLE` |
 | | `verify(token)` | `OK {amount, refId}` (100) · `ALREADY_VERIFIED {amount, refId}` (101) · `NOT_PAID` (−51) · `UNAVAILABLE` (503 / −1, timeout) · `NOT_FOUND` (−9) |
 | | `getSettlement(date)` (bonus) | rows · `UNAVAILABLE` |
-| `PayoutClient` | `submit({requestId, type, destination, amount, currency})` | `ACCEPTED {snapshot}` (202) · `REPLAYED {snapshot}` (200) · `REJECTED {error}` (400) · `AMBIGUOUS {reason}` (503, timeout, reset) |
-| | `getTransfer(requestId)` | `FOUND {status, reason, amount, trackingId}` · `NOT_FOUND` · `UNAVAILABLE` |
+| `PayoutClient` (`integrations/payout`; adapter `HttpPayoutClient`) | `requestBody(req)` (exactly what `submit` sends, so the attempt is recorded first) · `submit({requestId, destinationType, destination, amount})` → `POST /payout/transfers` `{requestId, type: IBAN \| CRYPTO, destination, amount (string), currency}` | `ACCEPTED {snapshot}` (202) · `REPLAYED {snapshot, mismatches}` (200; requestId, amount, currency, destination compared, PAY-02) · `REJECTED {error}` (400, 422) · `AMBIGUOUS {reason}` (503, timeout, reset, any other status, unreadable 2xx). Every outcome carries the wire exchange (request body, HTTP status, response body, error) for `payout_attempts` |
+| | `getTransfer(requestId)` → `GET /payout/transfers/{requestId}` | `FOUND {snapshot}` (200) · `NOT_FOUND` (404) · `UNAVAILABLE` (anything else, timeout, unreadable 200) |
 | `WebhookVerifier` | `verify(rawBody, signatureHeader)` | boolean, constant-time compare |
 | `InboundEvents` | `record(tx?, {source, eventId, reference, signatureValid, headers, rawBody, outcome})` | id |
 
