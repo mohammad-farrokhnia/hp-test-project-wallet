@@ -6,6 +6,20 @@ const wholeNumber = z
 
 const toman = (def: string) =>
   wholeNumber.default(def).transform((s) => BigInt(s) * 10n);
+/** Toman per 1 USDT, as a positive whole number; blank means the default. Converted to rial like every toman setting. */
+const usdtRate = (def: string) =>
+  z
+    .preprocess(
+      (v) => (v === '' ? undefined : v),
+      z
+        .string()
+        .regex(
+          /^[1-9]\d{0,11}$/,
+          'must be a positive whole number of toman per USDT',
+        )
+        .default(def),
+    )
+    .transform((s) => BigInt(s) * 10n);
 const micro = (def: string) =>
   wholeNumber.default(def).transform((s) => BigInt(s));
 const int = (def: number) => z.coerce.number().int().positive().default(def);
@@ -48,6 +62,7 @@ export const envSchema = z.object({
   WITHDRAW_DAILY_LIMIT_TOMAN: toman('200000000'),
   USDT_WITHDRAW_MIN_MICRO: micro('10000000'),
   USDT_WITHDRAW_FEE_MICRO: micro('1000000'),
+  USDT_IRT_REFERENCE_RATE: usdtRate('100000'),
 
   WITHDRAWAL_SAFETY_NET_SECONDS: int(30),
   WITHDRAWAL_SUBMIT_LEASE_SECONDS: int(30),

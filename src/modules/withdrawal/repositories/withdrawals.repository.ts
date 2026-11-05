@@ -17,6 +17,7 @@ export interface NewWithdrawal {
   readonly destination: string;
   readonly limitDay: string;
   readonly limitAmountRial: bigint;
+  readonly limitRateRialPerUsdt: bigint | null;
   readonly nextCheckInSeconds: number;
 }
 
@@ -82,6 +83,7 @@ export class WithdrawalsRepository {
         status: 'PENDING',
         limit_day: w.limitDay,
         limit_amount_rial: w.limitAmountRial,
+        limit_rate_rial_per_usdt: w.limitRateRialPerUsdt,
         next_check_at: sql<Date>`now() + make_interval(secs => ${w.nextCheckInSeconds})`,
       })
       .execute();

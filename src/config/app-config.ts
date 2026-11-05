@@ -25,6 +25,7 @@ export class AppConfig {
     withdrawDailyLimitRial: bigint;
     usdtWithdrawMinMicro: bigint;
     usdtWithdrawFeeMicro: bigint;
+    usdtReferenceRateRial: bigint;
   };
   readonly timing: {
     depositExpiryMinutes: number;
@@ -98,6 +99,7 @@ export class AppConfig {
       withdrawDailyLimitRial: e.WITHDRAW_DAILY_LIMIT_TOMAN,
       usdtWithdrawMinMicro: e.USDT_WITHDRAW_MIN_MICRO,
       usdtWithdrawFeeMicro: e.USDT_WITHDRAW_FEE_MICRO,
+      usdtReferenceRateRial: e.USDT_IRT_REFERENCE_RATE,
     };
     this.timing = {
       depositExpiryMinutes: e.DEPOSIT_EXPIRY_MINUTES,

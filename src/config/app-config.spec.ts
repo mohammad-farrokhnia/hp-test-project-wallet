@@ -30,6 +30,33 @@ describe('loadConfig', () => {
     });
   });
 
+  describe('USDT_IRT_REFERENCE_RATE (toman per USDT, B2)', () => {
+    const rate = (v?: string) =>
+      loadConfig({ ...TEST_ENV, USDT_IRT_REFERENCE_RATE: v }).limits
+        .usdtReferenceRateRial;
+
+    it('defaults to 100,000 toman, held as rial', () => {
+      expect(loadConfig(TEST_ENV).limits.usdtReferenceRateRial).toBe(
+        1_000_000n,
+      );
+    });
+
+    it('converts the configured toman to rial', () => {
+      expect(rate('250000')).toBe(2_500_000n);
+    });
+
+    it('treats a blank value as unset', () => {
+      expect(rate('')).toBe(1_000_000n);
+    });
+
+    it.each(['0', '-5', '1.5', 'abc', '1e5', ' 100', '1000000000000'])(
+      'refuses %j: it would make the limit meaningless',
+      (bad) => {
+        expect(() => rate(bad)).toThrow(/USDT_IRT_REFERENCE_RATE/);
+      },
+    );
+  });
+
   it('turns the internal guard on when a key is set', () => {
     expect(
       loadConfig({ ...TEST_ENV, INTERNAL_API_KEY: 'k' }).internalApiKey,

@@ -3,6 +3,7 @@
 //   A  api SIGKILLed mid POST /deposits burst, hostile simulator     D  RabbitMQ SIGKILLed twice under load
 //   B  workers SIGKILLed while paid deposits sync                    E  out-of-order and forged webhooks and callbacks
 //   C  Postgres restarted then SIGKILLed under deposit + withdrawal load   F  simulator restarted (provider state lost)
+//   H  USDT withdrawals end to end: fee, CRYPTO payout, one daily cap shared with IRT
 //   G  money races: parallel withdrawals against one balance and against the daily limit
 // Clients retry the way real ones do; afterwards it checks one deposit/withdrawal per key, no double credit, invariants, eventual completion.
 // `docker kill` counts as a manual stop (the restart policy ignores it), so a killed container is started again after a short delay.
@@ -245,6 +246,58 @@ const scenarios = {
     const wrongD = items[0].final?.creditedAmount;
     say(`  deposit with a forged 999999999 callback credited: ${wrongD} toman (must be 1000)`);
     if (wrongD !== '1000') problem(`E: forged amount credited ${wrongD}`);
+  },
+  async H() {
+    say('H: USDT withdrawals on the real stack and simulator: fee, CRYPTO payout, and one daily cap shared with IRT');
+    await setSimulator('default'); await waitHealthy();
+    const TRC20 = 'TLiap5woBhMmk8PUrsTtQAdJxRbZ1y79bP';
+    const seed = (u, currency, amount) => untilDone('POST', '/internal/adjustments', { userId: u, currency, amount, reason: 'chaos seed' }, { 'idempotency-key': `seed-${u}-${currency}` });
+    const feeRevenue = () => BigInt(psql(`SELECT balance_minor FROM accounts WHERE kind='FEE_REVENUE' AND currency='USDT' AND user_id IS NULL`)[0][0]);
+    const usdtBody = (u, amount) => ({ userId: u, currency: 'USDT', amount, destination: TRC20 });
+
+    const u = `chH_${run}_fee`;
+    await seed(u, 'USDT', '10');
+    const short = await call('POST', '/withdrawals', usdtBody(u, '10'), { 'idempotency-key': `h-short-${run}` });
+    say(`  10 USDT with exactly 10 available: ${short.status} ${short.body?.code}`);
+    if (short.status !== 422 || short.body?.code !== 'INSUFFICIENT_FUNDS') problem(`H: expected 422 INSUFFICIENT_FUNDS, got ${short.status}`);
+    await untilDone('POST', '/internal/adjustments', { userId: u, currency: 'USDT', amount: '1', reason: 'chaos top-up' }, { 'idempotency-key': `seed2-${u}` });
+    const feeBefore = feeRevenue();
+    const ok = await untilDone('POST', '/withdrawals', usdtBody(u, '10'), { 'idempotency-key': `h-ok-${run}` });
+    say(`  10 USDT with 11 available: ${ok.status}`);
+    if (ok.status !== 201) { problem(`H: expected 201, got ${ok.status} ${ok.text}`); return; }
+    const id = ok.body.withdrawalId;
+    const frozen = psql(`SELECT balance_minor FROM accounts WHERE user_id='${u}' AND kind='FROZEN' AND currency='USDT'`)[0][0];
+    say(`  frozen while open: ${frozen} micro-USDT (must be 11000000)`);
+    if (frozen !== '11000000') problem(`H: frozen ${frozen}`);
+    const t = await finals([{ id }], 'withdrawals', 300);
+    const w = psql(`SELECT status, limit_rate_rial_per_usdt, limit_amount_rial FROM withdrawals WHERE id='${id}'`)[0];
+    say(`  final after ${t}s: ${w.join(' ')} (rate rial/USDT and the rial counted, 10 USDT)`);
+    if (w[0] !== 'SUCCEEDED') problem(`H: withdrawal ${w[0]}`);
+    if (w[1] !== '1000000' || w[2] !== '10000000') problem(`H: rate/limit on row ${w[1]}/${w[2]}`);
+    const sent = psql(`SELECT request_body->>'type', request_body->>'currency', request_body->>'amount' FROM payout_attempts WHERE withdrawal_id='${id}' ORDER BY attempt_no LIMIT 1`)[0];
+    say(`  payout request: type=${sent[0]} currency=${sent[1]} amount=${sent[2]}`);
+    if (sent[0] !== 'CRYPTO' || sent[1] !== 'USDT' || sent[2] !== '10') problem(`H: payout body ${sent.join('/')}`);
+    const bal = Object.fromEntries(psql(`SELECT kind, balance_minor FROM accounts WHERE user_id='${u}' AND currency='USDT'`));
+    const feeGain = feeRevenue() - feeBefore;
+    say(`  balances ${JSON.stringify(bal)}; FEE_REVENUE grew by ${feeGain} micro-USDT (must be 1000000)`);
+    if (bal.FROZEN !== '0' || bal.AVAILABLE !== '0') problem(`H: balances ${JSON.stringify(bal)}`);
+    if (feeGain !== 1000000n) problem(`H: fee revenue grew by ${feeGain}`);
+
+    const m = `chH_${run}_mix`;
+    await seed(m, 'IRT', '1000000000'); await seed(m, 'USDT', '10000');
+    const a = await call('POST', '/withdrawals', { userId: m, currency: 'IRT', amount: '150000000', destination: IBAN }, { 'idempotency-key': `h-irt-${run}` });
+    const b = await call('POST', '/withdrawals', usdtBody(m, '500'), { 'idempotency-key': `h-usdt-${run}` });
+    const c = await call('POST', '/withdrawals', usdtBody(m, '10'), { 'idempotency-key': `h-usdt2-${run}` });
+    const d = await call('POST', '/withdrawals', { userId: m, currency: 'IRT', amount: '1000000', destination: IBAN }, { 'idempotency-key': `h-irt2-${run}` });
+    say(`  cap 200M toman: IRT 150M -> ${a.status}; USDT 500 (=50M toman) -> ${b.status}; USDT 10 -> ${c.status} ${c.body?.code}; IRT 1M -> ${d.status} ${d.body?.code}`);
+    if (a.status !== 201 || b.status !== 201) problem(`H: the first two should fit the cap exactly (${a.status}, ${b.status})`);
+    if (c.status !== 422 || c.body?.code !== 'DAILY_LIMIT_EXCEEDED') problem(`H: USDT over the cap answered ${c.status}`);
+    if (d.status !== 422 || d.body?.code !== 'DAILY_LIMIT_EXCEEDED') problem(`H: IRT over the cap answered ${d.status}`);
+    const used = psql(`SELECT used_rial FROM withdrawal_daily_usage WHERE user_id='${m}'`)[0][0];
+    say(`  day usage: ${used} rial (must be 2000000000, the cap)`);
+    if (used !== '2000000000') problem(`H: usage ${used}`);
+    await finals([a, b].filter((r) => r.status === 201).map((r) => ({ id: r.body.withdrawalId })), 'withdrawals', 420);
+    await globalChecks('H');
   },
   async G() {
     say('G: money races: parallel withdrawals against one balance and against the daily limit');

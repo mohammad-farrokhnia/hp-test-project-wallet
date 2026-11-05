@@ -734,5 +734,54 @@ describeDb(
         ),
       ).toEqual([]);
     });
+
+    describe('USDT: the fee (B1) and the daily limit (B2)', () => {
+      const rated = () =>
+        (10_000_000n * config.limits.usdtReferenceRateRial) / 1_000_000n;
+      const lines = (id: string, kind: string) =>
+        ds.query<{ account_kind: string; amount: string }[]>(
+          `SELECT p.account_kind, p.amount_minor::text AS amount
+             FROM postings p JOIN journals j ON j.id = p.journal_id
+            WHERE j.ref_id = $1 AND j.kind = $2
+            ORDER BY p.amount_minor`,
+          [id, kind],
+        );
+
+      it('SUCCEEDED: 10 USDT go to PAYOUT_CLEARING, the 1 USDT fee to FEE_REVENUE, and FROZEN empties', async () => {
+        const { id, userId } = await withdrawal('PROCESSING', 'USDT');
+        expect((await money(userId, 'USDT')).FROZEN).toBe('11000000');
+
+        await sync(id, found('SUCCEEDED'));
+
+        expect(await lines(id, 'WITHDRAWAL_SETTLE')).toEqual([
+          { account_kind: 'FROZEN', amount: '-11000000' },
+          { account_kind: 'FEE_REVENUE', amount: '1000000' },
+          { account_kind: 'PAYOUT_CLEARING', amount: '10000000' },
+        ]);
+        expect(await money(userId, 'USDT')).toMatchObject({
+          AVAILABLE: '19000000',
+          FROZEN: '0',
+          usage: rated().toString(),
+        });
+      });
+
+      it('FAILED: all 11 USDT return to AVAILABLE, no fee is taken, and the rated limit is given back', async () => {
+        const { id, userId } = await withdrawal('PROCESSING', 'USDT');
+        expect((await money(userId, 'USDT')).usage).toBe(rated().toString());
+
+        await sync(id, found('FAILED', 'PROVIDER_ERROR'));
+
+        expect(await lines(id, 'WITHDRAWAL_RELEASE')).toEqual([
+          { account_kind: 'FROZEN', amount: '-11000000' },
+          { account_kind: 'AVAILABLE', amount: '11000000' },
+        ]);
+        expect(await money(userId, 'USDT')).toMatchObject({
+          AVAILABLE: '30000000',
+          FROZEN: '0',
+          usage: '0',
+        });
+        expect(await lines(id, 'WITHDRAWAL_SETTLE')).toEqual([]);
+      });
+    });
   },
 );

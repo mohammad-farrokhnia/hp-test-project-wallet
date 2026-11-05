@@ -388,6 +388,127 @@ describeDb(
       });
     });
 
+    describe('USDT counts toward the daily toman limit at the reference rate (B2)', () => {
+      const { withdrawDailyLimitRial: cap, usdtReferenceRateRial: rate } =
+        loadConfig().limits;
+      /** Rial counted for a USDT amount: at the rate, rounded up. */
+      const counted = (micro: bigint) => (micro * rate + 999_999n) / 1_000_000n;
+      const microOf = (rial: bigint) => (rial * 1_000_000n) / rate;
+      /** A micro-USDT amount as the API's decimal string. */
+      const decimal = (micro: bigint) =>
+        `${micro / 1_000_000n}.${(micro % 1_000_000n).toString().padStart(6, '0')}`;
+      const usdtBody = (userId: string, amount: string) => ({
+        userId,
+        currency: 'USDT',
+        amount,
+        destination: TRC20,
+      });
+      const row = async (id: string) =>
+        (
+          await ds.query<
+            { rate: string | null; counted: string; day: string }[]
+          >(
+            `SELECT limit_rate_rial_per_usdt::text AS rate, limit_amount_rial::text AS counted,
+                    to_char(limit_day, 'YYYY-MM-DD') AS day
+               FROM withdrawals WHERE id = $1`,
+            [id],
+          )
+        )[0];
+
+      it('saves the rate on the row and counts the amount at that rate, without the fee', async () => {
+        const userId = newUser();
+        await fund(userId, usdt(30n));
+
+        const res = await withdraw(usdtBody(userId, '12.345679'));
+        expect(res.status).toBe(201);
+        const { withdrawalId } = res.body as { withdrawalId: string };
+
+        const expected = counted(12_345_679n);
+        expect(await row(withdrawalId)).toEqual({
+          rate: rate.toString(),
+          counted: expected.toString(),
+          day: await today(),
+        });
+        expect(await usage(userId)).toBe(expected.toString());
+        expect((await balances(userId, 'USDT')).FROZEN).toBe('13345679');
+      });
+
+      it('an IRT withdrawal keeps no rate and counts at face value', async () => {
+        const userId = newUser();
+        await fund(userId, toman(500_000n));
+        const res = await withdraw(irt(userId, '150000'));
+        const { withdrawalId } = res.body as { withdrawalId: string };
+        expect(await row(withdrawalId)).toMatchObject({
+          rate: null,
+          counted: '1500000',
+        });
+      });
+
+      it('IRT and USDT share one cap: IRT first, USDT up to the cap, then both are refused', async () => {
+        const userId = newUser();
+        await fund(userId, toman(1_000_000_000n));
+        await fund(userId, usdt(10_000n));
+        const irtRial = 150_000_000n * 10n;
+        expect((await withdraw(irt(userId, '150000000'))).status).toBe(201);
+
+        const room = microOf(cap - irtRial);
+        const fill = await withdraw(usdtBody(userId, decimal(room)));
+        expect(fill.status).toBe(201);
+        expect(BigInt((await usage(userId)) ?? '0')).toBe(
+          irtRial + counted(room),
+        );
+
+        const usdtBefore = await balances(userId, 'USDT');
+        const refusedUsdt = await withdraw(usdtBody(userId, '10'));
+        expect(refusedUsdt.status).toBe(422);
+        expect(refusedUsdt.body).toMatchObject({
+          code: 'DAILY_LIMIT_EXCEEDED',
+        });
+        expect(await balances(userId, 'USDT')).toEqual(usdtBefore);
+        const refusedIrt = await withdraw(irt(userId, '1000000'));
+        expect(refusedIrt.status).toBe(422);
+        expect(refusedIrt.body).toMatchObject({ code: 'DAILY_LIMIT_EXCEEDED' });
+      });
+
+      it('USDT first, then IRT: the same cap in the other order, to the last toman', async () => {
+        const userId = newUser();
+        await fund(userId, toman(1_000_000_000n));
+        await fund(userId, usdt(5_000n));
+        const usdtMicro = microOf((cap * 3n) / 4n);
+        expect(
+          (await withdraw(usdtBody(userId, decimal(usdtMicro)))).status,
+        ).toBe(201);
+
+        const leftToman = (cap - counted(usdtMicro)) / 10n;
+        const over = await withdraw(irt(userId, (leftToman + 1n).toString()));
+        expect(over.status).toBe(422);
+        expect(over.body).toMatchObject({ code: 'DAILY_LIMIT_EXCEEDED' });
+        expect((await withdraw(irt(userId, leftToman.toString()))).status).toBe(
+          201,
+        );
+      });
+
+      it('a USDT withdrawal worth more than the cap is refused whole: nothing reserved, nothing frozen', async () => {
+        const userId = newUser();
+        await fund(userId, usdt(5_000n));
+        const over = microOf(cap) / 1_000_000n + 1n;
+        const res = await withdraw(usdtBody(userId, over.toString()));
+        expect(res.status).toBe(422);
+        expect(res.body).toMatchObject({ code: 'DAILY_LIMIT_EXCEEDED' });
+        expect(BigInt((await usage(userId)) ?? '0')).toBe(0n);
+        expect(await balances(userId, 'USDT')).toMatchObject({
+          AVAILABLE: '5000000000',
+          FROZEN: '0',
+        });
+      });
+
+      it('the largest USDT amount the API accepts is refused cleanly, never a 500', async () => {
+        const res = await withdraw(usdtBody(newUser(), '9223372036854.775807'));
+        expect(res.status).toBe(400);
+        expect(res.body).toMatchObject({ code: 'VALIDATION_ERROR' });
+      });
+    });
+
     describe('GET /withdrawals/:id', () => {
       it('returns the withdrawal in API units with the destination masked', async () => {
         const userId = newUser();

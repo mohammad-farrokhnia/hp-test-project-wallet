@@ -220,7 +220,7 @@ One row per account change. Immutable.
 | provider_tracking_id | text | yes | `trackingId` |
 | limit_day | date | no | Tehran day the amount counts against |
 | limit_amount_rial | bigint | no | amount counted toward the daily limit |
-| limit_rate_rial_per_usdt | bigint | yes | USDT only (bonus): the rate used |
+| limit_rate_rial_per_usdt | bigint | yes | USDT only (bonus): the reference rate used, rial per 1 USDT (`USDT_IRT_REFERENCE_RATE` toman × 10), snapshotted at request; `limit_amount_rial` is the amount × this rate, rounded up |
 | submit_attempts | int | no | default 0 |
 | needs_review | boolean | no | default false |
 | review_reason | text | yes | `STUCK`, `REPLAY_MISMATCH`, `LATE_SUCCESS`, `UNKNOWN_AFTER_SUCCESS` |

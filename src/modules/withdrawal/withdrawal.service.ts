@@ -56,7 +56,7 @@ export class WithdrawalService {
   /**
    * @function request
    * @description `POST /withdrawals`. Error precedence:
-   * before the transaction, not stored: 400 `INVALID_DESTINATION`, then 422 `BELOW_MINIMUM`;
+   * before the transaction, not stored: 400 `INVALID_DESTINATION`, then 422 `BELOW_MINIMUM` (or 400 `VALIDATION_ERROR` for an amount whose total cannot be held);
    * then one transaction, in lock order (key → accounts by id → daily usage):
    * 1. claim the key (a repeat replays; another body is 422 `IDEMPOTENCY_KEY_REUSED`);
    * 2. lock the user's accounts; available < amount + fee → stored 422 `INSUFFICIENT_FUNDS`;
@@ -76,7 +76,11 @@ export class WithdrawalService {
     );
     if (destination === null) throw new AppError('INVALID_DESTINATION');
     const quoted = quoteWithdrawal(policy, cmd.amount);
-    if (!quoted.ok) throw new AppError('BELOW_MINIMUM');
+    if (!quoted.ok) {
+      throw quoted.reason === 'TOO_LARGE'
+        ? new AppError('VALIDATION_ERROR', 'amount is too large')
+        : new AppError('BELOW_MINIMUM');
+    }
 
     return this.runner.run(async (tx) => {
       const claim = await this.idempotency.claim(tx, {
@@ -160,12 +164,13 @@ export class WithdrawalService {
     if (locked.available.lt(quote.total)) {
       return { ok: false, rejection: rejection('INSUFFICIENT_FUNDS') };
     }
+    const cap = this.config.limits.withdrawDailyLimitRial;
     const day = await tehranDay(tx);
     const reserved = await this.limits.reserve(tx, {
       userId,
       day,
-      amountRial: quote.limitAmountRial,
-      capRial: this.config.limits.withdrawDailyLimitRial,
+      amountRial: bigMin(quote.limitAmountRial, cap + 1n),
+      capRial: cap,
     });
     if (!reserved)
       return { ok: false, rejection: rejection('DAILY_LIMIT_EXCEEDED') };
@@ -195,6 +200,7 @@ export class WithdrawalService {
       destination: w.destination,
       limitDay: w.day,
       limitAmountRial: quote.limitAmountRial,
+      limitRateRialPerUsdt: quote.limitRateRialPerUsdt,
       nextCheckInSeconds: this.config.timing.withdrawalSafetyNetSeconds,
     });
     await this.ledger.post(tx, {
@@ -230,6 +236,11 @@ export class WithdrawalService {
     );
     return { response, replayed: false };
   }
+}
+
+/** Anything above the cap is refused alike, so cap + 1 stands for it and the counter's arithmetic can never overflow. */
+function bigMin(a: bigint, b: bigint): bigint {
+  return a < b ? a : b;
 }
 
 function rejection(code: ErrorCode, message?: string): StoredResponse {
