@@ -30,6 +30,7 @@ export interface SyncRow {
   readonly fee: Money;
   readonly limitDay: string;
   readonly limitAmountRial: bigint;
+  readonly openSince: Date;
 }
 
 /** What the submit job reads under its row lock. */

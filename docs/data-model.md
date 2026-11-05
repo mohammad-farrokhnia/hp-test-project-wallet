@@ -285,7 +285,7 @@ Every submit to the payout service, opened **before** the call.
 | psp_ref_id | text | yes | unique; the bank reference, used by reconciliation |
 | paid_seen_at | timestamptz | yes | first time we saw PAID; drives the 2-minute alert |
 | needs_review | boolean | no | default false |
-| review_reason | text | yes | `AMOUNT_DIFFERS`, `UNVERIFIED_TOO_LONG`, `LATE_PAYMENT_AFTER_EXPIRY`, `UNKNOWN_TOKEN` |
+| review_reason | text | yes | `AMOUNT_DIFFERS`, `UNVERIFIED_TOO_LONG`, `LATE_PAYMENT_AFTER_EXPIRY`, `UNKNOWN_TOKEN`, `DUPLICATE_REF` |
 | next_check_at | timestamptz | yes | null = nothing to do |
 | check_attempts | int | no | default 0; drives the poll schedule |
 | expires_at | timestamptz | no | `created_at + 24 h` (ADR-11) |

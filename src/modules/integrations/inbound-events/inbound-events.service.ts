@@ -20,9 +20,21 @@ export interface InboundEvent {
   readonly outcome: InboundOutcome;
 }
 
+/** The character PostgreSQL `text` cannot store. */
+const NUL = '\u0000';
+
+/**
+ * @function storable
+ * @description Replaces NUL characters with U+FFFD: PostgreSQL refuses them in `text`, and a delivery that carries one must still be recorded, not turn into a 500.
+ * Signatures are checked on the raw bytes before this, so nothing that is verified is affected.
+ */
+function storable(text: string): string {
+  return text.split(NUL).join('\uFFFD');
+}
+
 /**
  * @class InboundEvents
- * @description Records every callback and webhook as received, rejected ones too:
+ * @description Records every callback and webhook as received, rejected ones too (a NUL character, which `text` cannot hold, is stored as U+FFFD):
  * the audit trail and the evidence behind the provider notes. Kept 30 days.
  */
 @Injectable()
@@ -33,11 +45,11 @@ export class InboundEvents {
       .insertInto('inbound_events')
       .values({
         source: e.source,
-        event_id: e.eventId,
-        reference: e.reference,
+        event_id: e.eventId === null ? null : storable(e.eventId),
+        reference: e.reference === null ? null : storable(e.reference),
         signature_valid: e.signatureValid,
         headers: JSON.stringify(e.headers),
-        raw_body: e.rawBody,
+        raw_body: storable(e.rawBody),
         outcome: e.outcome,
       })
       .returning('id')

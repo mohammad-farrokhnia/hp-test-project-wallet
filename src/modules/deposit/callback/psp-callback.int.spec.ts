@@ -1,10 +1,11 @@
-import { INestApplication, Logger } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
-import { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../../../app.module';
+import { APP_OPTIONS, configureBodyParsing } from '../../../common/http';
 import { connectTestDb, describeDb } from '../../../database/int-testing';
 import { TransactionRunner } from '../../../database/transaction-runner';
 import { HttpPspClient } from '../../integrations/psp/http-psp.client';
@@ -21,7 +22,7 @@ interface Pending {
 
 describeDb('POST /webhooks/psp/callback/:depositId (real PostgreSQL)', () => {
   let ds: DataSource;
-  let app: INestApplication<App>;
+  let app: NestExpressApplication;
   let handler: DepositSyncHandler;
   const psp = new FakePspServer();
   const savedEnv = { ...process.env };
@@ -40,7 +41,8 @@ describeDb('POST /webhooks/psp/callback/:depositId (real PostgreSQL)', () => {
     const ref = await Test.createTestingModule({
       imports: [AppModule.forRole('api')],
     }).compile();
-    app = ref.createNestApplication({ rawBody: true });
+    app = ref.createNestApplication<NestExpressApplication>(APP_OPTIONS);
+    configureBodyParsing(app);
     await app.listen(0, '127.0.0.1');
     handler = new DepositSyncHandler(
       new TransactionRunner(ds, {
@@ -283,18 +285,64 @@ describeDb('POST /webhooks/psp/callback/:depositId (real PostgreSQL)', () => {
       ['an empty JSON object', '{}', 'application/json'],
       ['a JSON array', '[1,2]', 'application/json'],
       ['plain text', 'status=OK', 'text/plain'],
-    ])('%s → 200, MISMATCH, nothing queued', async (_c, raw, type) => {
+      [
+        'form-encoded',
+        'token=A0x&status=OK',
+        'application/x-www-form-urlencoded',
+      ],
+      ['JSON that is cut off', '{"token": ', 'application/json'],
+      ['JSON with trailing garbage', '{"status":"OK"}xx', 'application/json'],
+      ['single-quoted JSON', "{'status':'OK'}", 'application/json'],
+      [
+        'a UTF-8 BOM and then JSON',
+        '\ufeff{"status":"OK"}',
+        'application/json',
+      ],
+    ])(
+      '%s → 200, recorded exactly as received, MISMATCH, nothing queued',
+      async (_c, raw, type) => {
+        const d = await pending();
+        await callback(d.id, raw, type).expect(200);
+        expect(await recorded(d.id)).toMatchObject([
+          { outcome: 'MISMATCH', raw_body: raw },
+        ]);
+        expect(await syncJobs(d.id)).toEqual([]);
+      },
+    );
+
+    it('a body with NUL bytes is recorded (NUL stored as U+FFFD, which text columns can hold) and answered 200', async () => {
       const d = await pending();
-      await callback(d.id, raw, type).expect(200);
-      expect(await recorded(d.id)).toMatchObject([{ outcome: 'MISMATCH' }]);
-      expect(await syncJobs(d.id)).toEqual([]);
+      await callback(d.id, 'a\u0000b', 'text/plain').expect(200);
+      expect(await recorded(d.id)).toMatchObject([
+        { outcome: 'MISMATCH', raw_body: 'a\uFFFDb' },
+      ]);
     });
 
-    it('a body that claims to be JSON and is not is refused by the body parser with 400 before the controller: nothing is queued', async () => {
+    it('invalid UTF-8 bytes are recorded and answered 200 too', async () => {
       const d = await pending();
-      await callback(d.id, '{"token": ').expect(400);
-      expect(await syncJobs(d.id)).toEqual([]);
+      await request(app.getHttpServer())
+        .post(`/webhooks/psp/callback/${d.id}`)
+        .set('content-type', 'application/json')
+        .send(Buffer.from([0x7b, 0x22, 0xff, 0xfe, 0x22, 0x7d]))
+        .expect(200);
+      expect(await recorded(d.id)).toMatchObject([{ outcome: 'MISMATCH' }]);
+    });
+
+    it('a body over the 100 KB limit is refused by the parser: 400, nothing recorded', async () => {
+      const d = await pending();
+      await callback(d.id, JSON.stringify({ pad: 'x'.repeat(150_000) })).expect(
+        400,
+      );
       expect(await recorded(d.id)).toEqual([]);
+    });
+
+    it('ordinary routes still refuse malformed JSON with 400', async () => {
+      await request(app.getHttpServer())
+        .post('/deposits')
+        .set('content-type', 'application/json')
+        .set('Idempotency-Key', `d4-${randomUUID()}`)
+        .send('{"userId": ')
+        .expect(400);
     });
 
     it('a deposit whose payment was never issued (CREATED, no token) → MISMATCH', async () => {

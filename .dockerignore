@@ -32,6 +32,7 @@ Thumbs.db
 # Docker
 Dockerfile*
 docker-compose*
+!docker-compose.yml
 .dockerignore
 
 # Temporary files

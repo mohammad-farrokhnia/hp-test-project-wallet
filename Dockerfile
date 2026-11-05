@@ -26,6 +26,7 @@ FROM deps AS test
 COPY tsconfig.json tsconfig.build.json nest-cli.json ./
 COPY src ./src
 COPY jest.env.js jest.load-env.js jest.global-setup.js ./
+COPY docker-compose.yml .env.example ./
 CMD ["npm", "test"]
 
 # ---- runtime target (default) ----

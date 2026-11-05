@@ -10,6 +10,7 @@ const state = (
   returned: false,
   attemptInFlight: false,
   lastAttemptRejected: false,
+  uncertainTooLong: false,
   ...over,
 });
 const found = (
@@ -108,10 +109,25 @@ describe('decideSync: the withdrawal state machine (state-machines.md)', () => {
       });
     });
 
-    it('PROCESSING (the provider had accepted it) → review, no money moves', () => {
-      expect(decideSync(state('PROCESSING'), NOT_FOUND)).toMatchObject({
+    it('PROCESSING, young (the provider had accepted it): no flag, no money, checked again in 30 s', () => {
+      const d = decideSync(state('PROCESSING'), NOT_FOUND);
+      expect(d).toMatchObject({
+        rule: 'UNKNOWN_QUIET',
+        journals: [],
+        nextCheckSeconds: 30,
+      });
+      expect(d.review).toBeUndefined();
+      expect(d.to).toBeUndefined();
+    });
+
+    it('PROCESSING, still 404 after REVIEW_AFTER_MINUTES → review, no money moves, slow checks', () => {
+      expect(
+        decideSync(state('PROCESSING', { uncertainTooLong: true }), NOT_FOUND),
+      ).toMatchObject({
+        rule: 'UNKNOWN_AFTER_ACCEPT',
         review: 'UNKNOWN_AFTER_SUCCESS',
         journals: [],
+        nextCheckSeconds: 300,
       });
     });
   });
@@ -139,6 +155,27 @@ describe('decideSync: the withdrawal state machine (state-machines.md)', () => {
         });
       },
     );
+
+    it('GET 404, young: no flag, no money, checked again in 30 s (the provider lags)', () => {
+      const d = decideSync(state('SUCCEEDED'), NOT_FOUND);
+      expect(d).toMatchObject({
+        rule: 'UNKNOWN_QUIET',
+        journals: [],
+        nextCheckSeconds: 30,
+      });
+      expect(d.review).toBeUndefined();
+    });
+
+    it('GET 404 after REVIEW_AFTER_MINUTES → flagged for review, no money, slow checks', () => {
+      expect(
+        decideSync(state('SUCCEEDED', { uncertainTooLong: true }), NOT_FOUND),
+      ).toMatchObject({
+        rule: 'UNKNOWN_AFTER_SUCCESS',
+        review: 'UNKNOWN_AFTER_SUCCESS',
+        journals: [],
+        nextCheckSeconds: 300,
+      });
+    });
 
     it('already returned → final, a second RETURNED books nothing', () => {
       expect(

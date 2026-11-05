@@ -484,8 +484,28 @@ describeDb(
         expect(n).toBe('1');
       });
 
-      it('after the provider had accepted it: flagged for review, no money moves', async () => {
+      it('right after the provider had accepted it: no flag, no money moves, checked again soon, and a later 200 settles it', async () => {
         const { id, userId } = await withdrawal();
+        await sync(id, { kind: 'NOT_FOUND' });
+        expect(await row(id)).toMatchObject({
+          status: 'PROCESSING',
+          needs_review: false,
+        });
+        expect(await journals(id)).toEqual({ WITHDRAWAL_FREEZE: 1 });
+        expect((await money(userId)).FROZEN).toBe('1500000');
+        await sync(id, found('SUCCEEDED'));
+        expect(await row(id)).toMatchObject({
+          status: 'SUCCEEDED',
+          needs_review: false,
+        });
+      });
+
+      it('still 404 after REVIEW_AFTER_MINUTES: flagged for review, no money moves', async () => {
+        const { id, userId } = await withdrawal();
+        await ds.query(
+          `UPDATE withdrawals SET submitted_at = now() - interval '31 minutes' WHERE id = $1`,
+          [id],
+        );
         await sync(id, { kind: 'NOT_FOUND' });
         expect(await row(id)).toMatchObject({
           status: 'PROCESSING',
@@ -494,6 +514,38 @@ describeDb(
         });
         expect(await journals(id)).toEqual({ WITHDRAWAL_FREEZE: 1 });
         expect((await money(userId)).FROZEN).toBe('1500000');
+      });
+
+      it('a transfer already reported SUCCEEDED that answers 404 minutes later: no flag, settled once, and a later RETURNED still books its return', async () => {
+        const { id, userId } = await withdrawal();
+        await sync(id, found('SUCCEEDED'));
+        const settled = await journals(id);
+        await sync(id, { kind: 'NOT_FOUND' });
+        expect(await row(id)).toMatchObject({
+          status: 'SUCCEEDED',
+          needs_review: false,
+        });
+        expect(await journals(id)).toEqual(settled);
+        await sync(id, found('RETURNED', 'ACCOUNT_CLOSED'));
+        expect((await journals(id)).WITHDRAWAL_RETURN).toBe(1);
+        expect((await money(userId)).AVAILABLE).toBe('5000000');
+      });
+
+      it('SUCCEEDED, then still 404 after REVIEW_AFTER_MINUTES: flagged, nothing moves', async () => {
+        const { id } = await withdrawal();
+        await sync(id, found('SUCCEEDED'));
+        await ds.query(
+          `UPDATE withdrawals SET submitted_at = now() - interval '31 minutes' WHERE id = $1`,
+          [id],
+        );
+        const settled = await journals(id);
+        await sync(id, { kind: 'NOT_FOUND' });
+        expect(await row(id)).toMatchObject({
+          status: 'SUCCEEDED',
+          needs_review: true,
+          review_reason: 'UNKNOWN_AFTER_SUCCESS',
+        });
+        expect(await journals(id)).toEqual(settled);
       });
     });
 

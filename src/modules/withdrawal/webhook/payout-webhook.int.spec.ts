@@ -1,10 +1,11 @@
-import { INestApplication, Logger } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { createHmac, randomUUID } from 'node:crypto';
 import request from 'supertest';
-import { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../../../app.module';
+import { APP_OPTIONS, configureBodyParsing } from '../../../common/http';
 import { Money } from '../../../common/money';
 import { loadConfig } from '../../../config/app-config';
 import { connectTestDb, describeDb } from '../../../database/int-testing';
@@ -15,7 +16,7 @@ const IBAN = 'IR330566736841214070501510';
 
 describeDb('POST /webhooks/payout (real PostgreSQL)', () => {
   let ds: DataSource;
-  let app: INestApplication<App>;
+  let app: NestExpressApplication;
   let runner: TransactionRunner;
   const secret = loadConfig().payout.webhookSecret;
   const ledger = newLedgerService();
@@ -30,7 +31,8 @@ describeDb('POST /webhooks/payout (real PostgreSQL)', () => {
     const ref = await Test.createTestingModule({
       imports: [AppModule.forRole('api')],
     }).compile();
-    app = ref.createNestApplication({ rawBody: true });
+    app = ref.createNestApplication<NestExpressApplication>(APP_OPTIONS);
+    configureBodyParsing(app);
     await app.listen(0, '127.0.0.1');
   });
 
@@ -158,6 +160,67 @@ describeDb('POST /webhooks/payout (real PostgreSQL)', () => {
     expect(await recorded(id)).toMatchObject([
       { outcome: 'ACCEPTED', signature_valid: true, raw_body: raw },
     ]);
+  });
+
+  describe('a body that is not valid JSON', () => {
+    const garbage = ['{"requestId": ', '{{{{', "{'requestId':'x'}", '[1,2,3'];
+
+    it.each(garbage)(
+      'unsigned %j → 401 and recorded as REJECTED_SIGNATURE, exactly as received',
+      async (raw) => {
+        const res = await deliver(raw, null);
+        expect(res.status).toBe(401);
+        const [row] = await ds.query<{ outcome: string; raw_body: string }[]>(
+          `SELECT outcome, raw_body FROM inbound_events
+            WHERE source = 'PAYOUT_WEBHOOK' AND raw_body = $1
+            ORDER BY id DESC LIMIT 1`,
+          [raw],
+        );
+        expect(row).toEqual({ outcome: 'REJECTED_SIGNATURE', raw_body: raw });
+      },
+    );
+
+    it.each(garbage)(
+      'signed %j → 200 and recorded as UNKNOWN_REFERENCE: nothing to schedule, but nothing lost',
+      async (raw) => {
+        const res = await deliver(raw, sign(raw));
+        expect(res.status).toBe(200);
+        const [row] = await ds.query<
+          { outcome: string; signature_valid: boolean }[]
+        >(
+          `SELECT outcome, signature_valid FROM inbound_events
+            WHERE source = 'PAYOUT_WEBHOOK' AND raw_body = $1
+            ORDER BY id DESC LIMIT 1`,
+          [raw],
+        );
+        expect(row).toEqual({
+          outcome: 'UNKNOWN_REFERENCE',
+          signature_valid: true,
+        });
+      },
+    );
+
+    it('a signed body with NUL bytes is recorded and answered 200; the signature is still checked on the exact bytes', async () => {
+      const raw = `{"requestId":"x\u0000y"`;
+      expect((await deliver(raw, sign(raw))).status).toBe(200);
+      const [row] = await ds.query<{ outcome: string; raw_body: string }[]>(
+        `SELECT outcome, raw_body FROM inbound_events WHERE source = 'PAYOUT_WEBHOOK' AND raw_body LIKE '{"requestId":"x%y"' ORDER BY id DESC LIMIT 1`,
+      );
+      expect(row).toEqual({
+        outcome: 'UNKNOWN_REFERENCE',
+        raw_body: '{"requestId":"x\uFFFDy"',
+      });
+      expect((await deliver(raw, sign('different'))).status).toBe(401);
+    });
+
+    it('ordinary routes still refuse malformed JSON with 400', async () => {
+      await request(app.getHttpServer())
+        .post('/withdrawals')
+        .set('content-type', 'application/json')
+        .set('Idempotency-Key', `x7-${randomUUID()}`)
+        .send('{"userId": ')
+        .expect(400);
+    });
   });
 
   it('verifies the raw bytes: unusual spacing signed as sent is valid', async () => {

@@ -17,7 +17,8 @@ export type DepositReviewReason =
   | 'AMOUNT_DIFFERS'
   | 'UNVERIFIED_TOO_LONG'
   | 'LATE_PAYMENT_AFTER_EXPIRY'
-  | 'UNKNOWN_TOKEN';
+  | 'UNKNOWN_TOKEN'
+  | 'DUPLICATE_REF';
 
 /** What a callback is matched against. */
 export interface CallbackTarget {

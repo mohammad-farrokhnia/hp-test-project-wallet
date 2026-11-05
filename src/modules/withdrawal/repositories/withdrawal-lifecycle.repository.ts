@@ -153,6 +153,8 @@ export class WithdrawalLifecycleRepository {
         'fee_minor',
         'limit_day',
         'limit_amount_rial',
+        'submitted_at',
+        'created_at',
       ])
       .where('id', '=', id)
       .forUpdate()
@@ -168,6 +170,7 @@ export class WithdrawalLifecycleRepository {
       fee: Money.of(currency, BigInt(r.fee_minor)),
       limitDay: r.limit_day,
       limitAmountRial: BigInt(r.limit_amount_rial),
+      openSince: r.submitted_at ?? r.created_at,
     };
   }
 

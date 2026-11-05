@@ -10,6 +10,21 @@ server {
   # Webhook HMAC is computed over the raw body: never buffer-rewrite or alter it.
   client_max_body_size 1m;
 
+
+  # Errors nginx raises itself (the app's own answers pass through untouched) keep the API's JSON error shape.
+  error_page 400 /_error_400;
+  error_page 405 /_error_405;
+  error_page 413 /_error_413;
+  error_page 414 /_error_414;
+  error_page 494 /_error_431;
+  error_page 502 503 504 /_error_unavailable;
+  location = /_error_400 { internal; default_type application/json; return 400 '{"code":"VALIDATION_ERROR","message":"Malformed request"}'; }
+  location = /_error_405 { internal; default_type application/json; return 405 '{"code":"NOT_FOUND","message":"Method not allowed"}'; }
+  location = /_error_413 { internal; default_type application/json; return 413 '{"code":"VALIDATION_ERROR","message":"Request body is too large"}'; }
+  location = /_error_414 { internal; default_type application/json; return 414 '{"code":"VALIDATION_ERROR","message":"Request URL is too long"}'; }
+  location = /_error_431 { internal; default_type application/json; return 431 '{"code":"VALIDATION_ERROR","message":"Request headers are too large"}'; }
+  location = /_error_unavailable { internal; default_type application/json; return 503 '{"code":"NOT_READY","message":"Service is not ready"}'; }
+
   location / {
     set $upstream http://api:${PORT};
     proxy_pass $upstream;

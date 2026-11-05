@@ -196,7 +196,7 @@ What gets stored: 2xx responses and state-dependent 422s (`INSUFFICIENT_FUNDS`, 
 1. Verify `x-signature` = hex HMAC-SHA256(raw body, secret) in constant time. Invalid → `inbound_events` (`REJECTED_SIGNATURE`) and 401.
 2. Valid → in one transaction: record it; look up the withdrawal by `requestId`. Unknown (or not a uuid) → `UNKNOWN_REFERENCE`, 200. Known → `next_check_at = now()` plus outbox `job.withdrawal.sync` with `trigger: WEBHOOK` (so the sync pulls even a final withdrawal), 200 `{received: true}`. The status in the body is never applied. Target: under 50 ms.
 
-The verifier compares the decoded digests with `timingSafeEqual` after checking for exactly 64 hex characters; it is tested against signatures captured from the simulator. A body that is not JSON is refused by the body parser (400) before it can be recorded.
+The verifier compares the decoded digests with `timingSafeEqual` after checking for exactly 64 hex characters; it is tested against signatures captured from the simulator. A body that is not JSON is not refused by the body parser: it is read as raw bytes, so the delivery is recorded as received and answered like any other (401 without a valid signature, otherwise 200).
 
 ### deposit
 **Owns:** `deposits`. **Depends on:** ledger, idempotency, messaging, psp, inbound events.
@@ -229,7 +229,7 @@ Next, `PspClient.createPayment(amountRial, orderId = depositId, callbackUrl)`. T
 1. Record in `inbound_events`.
 2. Load the deposit by the path id. The body's `orderId` must equal it, and its `token` must equal ours once known; otherwise `MISMATCH`.
 3. Non-final deposit → `next_check_at = now()` plus outbox `job.deposit.sync`.
-4. Always answer 200. The callback's `status` and `amount` are ignored (PSP-06/07). The one exception is a body that claims to be JSON and is not: the body parser answers 400 before the controller runs, and nothing is recorded. The simulator never sends one.
+4. Always answer 200. The callback's `status` and `amount` are ignored (PSP-06/07). The body is read as raw bytes whatever its content type (`common/http`: webhook routes skip the JSON parser), so a body that is not valid JSON is recorded exactly as received and still answered 200, or 401 for a payout webhook without a valid signature. Only a body over the 100 KB limit is refused by the parser (400) before our code runs.
 
 **`DepositSyncHandler`:**
 1. `PspClient.getPayment(token)`.
@@ -239,7 +239,7 @@ Next, `PspClient.createPayment(amountRial, orderId = depositId, callbackUrl)`. T
    - `FAILED` → `FAILED (PSP_FAILED)`.
    - `REVERSED` → `FAILED (PSP_REVERSED)`.
 
-   The lookup and `verify` run outside any transaction; the decision is made on the row as locked. A bank reference that already credited another deposit violates `UNIQUE (psp_ref_id)`: the job fails, is retried, and dead-letters, so money is never booked twice. A deposit that is not `PENDING` costs no PSP call.
+   The lookup and `verify` run outside any transaction; the decision is made on the row as locked. A bank reference that already credited another deposit violates `UNIQUE (psp_ref_id)`: that update is refused, the deposit is flagged `DUPLICATE_REF` with an alert and checked hourly, and the job ends normally, so money is never booked twice and no poison job loops. A deposit that is not `PENDING` costs no PSP call.
 
 ### transfer (bonus)
 **Owns:** `transfers`. **Depends on:** ledger, idempotency.

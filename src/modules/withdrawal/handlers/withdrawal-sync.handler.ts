@@ -26,6 +26,7 @@ import { WEBHOOK_TRIGGER } from '../webhook/payout-webhook.service';
 import { RESUBMIT_AFTER_NOT_FOUND } from './withdrawal-submit.handler';
 
 const HOUR_MS = 3_600_000;
+const MINUTE_MS = 60_000;
 
 /**
  * @class WithdrawalSyncHandler
@@ -98,6 +99,9 @@ export class WithdrawalSyncHandler implements JobHandler {
         ),
         lastAttemptRejected:
           (await this.attempts.lastOutcome(tx, id)) === 'REJECTED',
+        uncertainTooLong:
+          Date.now() - w.openSince.getTime() >=
+          this.config.timing.reviewAfterMinutes * MINUTE_MS,
       },
       lookup,
     );
@@ -136,7 +140,11 @@ export class WithdrawalSyncHandler implements JobHandler {
         payload: { withdrawalId: id, after: RESUBMIT_AFTER_NOT_FOUND },
       });
     }
-    if (decision.rule !== 'W7' && decision.rule !== 'IGNORED') {
+    if (decision.rule === 'UNKNOWN_QUIET') {
+      this.logger.debug(
+        `${id}: provider answered 404 for a PROCESSING transfer; checking again`,
+      );
+    } else if (decision.rule !== 'W7' && decision.rule !== 'IGNORED') {
       this.logger.log(
         `${id}: ${decision.rule} ${w.status} → ${decision.to ?? w.status}` +
           (decision.journals.length

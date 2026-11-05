@@ -55,7 +55,11 @@ Stop with `docker compose down` (add `-v` to also delete the database and queue 
 | `postgres`, `rabbitmq` | data stores |
 | `simulator` | the PSP and payout provider simulator (`SIM_CHAOS`: `off`, `default`, `hostile`) |
 
-Postgres, RabbitMQ (AMQP and UI) and the simulator are published on `127.0.0.1` only. Find a port with `docker compose port postgres 5432`, or pin it with `POSTGRES_PORT`, `RABBITMQ_PORT`, `RABBITMQ_UI_PORT` or `SIMULATOR_PORT` in `.env`.
+Postgres, RabbitMQ (AMQP and UI) and the simulator are published on `127.0.0.1` only. `.env.example` pins Postgres, RabbitMQ and the simulator (`SIMULATOR_PORT=8080`, which is where `PSP_BASE_URL` and `PAYOUT_BASE_URL` point), so a copy of it works from the host as it is; a spec keeps those values consistent. Set a port to `0` for any free one and find it with `docker compose port <service> <port>`.
+
+The public entry point (nginx) is published on `127.0.0.1` too (`APP_BIND`), because with `INTERNAL_API_KEY` empty the `/internal/*` endpoints are open: only the machine itself can reach them. To publish the service on the network, set `INTERNAL_API_KEY` first, then `APP_BIND=0.0.0.0`.
+
+Every long-running service has `restart: unless-stopped`, so a crashed API, worker or dependency comes back by itself. A container you stop yourself (`docker stop`, `docker kill`) stays stopped until you start it.
 
 ## Configuration
 

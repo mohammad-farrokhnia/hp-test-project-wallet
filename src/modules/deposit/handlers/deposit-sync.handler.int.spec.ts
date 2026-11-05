@@ -265,7 +265,7 @@ describeDb('DepositSyncHandler: the state machine on real PostgreSQL', () => {
       expect(await available(d.userId)).toBe('10000');
     });
 
-    it('a bank reference that already credited another deposit is refused, not credited twice', async () => {
+    it('a bank reference that already credited another deposit is refused and flagged, not credited twice, and the job does not fail', async () => {
       const a = await pending();
       const b = await pending();
       fake.pay(a.token);
@@ -273,12 +273,17 @@ describeDb('DepositSyncHandler: the state machine on real PostgreSQL', () => {
       payment(b).refId = payment(a).refId;
       await sync(a.id);
 
-      await expect(sync(b.id)).rejects.toThrow(/deposits_psp_ref_id_key/);
+      await expect(sync(b.id)).resolves.toBeUndefined();
 
       expect(await row(b.id)).toMatchObject({
         status: 'PENDING',
         credited_rial: null,
+        needs_review: true,
+        review_reason: 'DUPLICATE_REF',
       });
+      const next = (await row(b.id)).next_in as number;
+      expect(next).toBeGreaterThan(3500);
+      expect(next).toBeLessThanOrEqual(3600);
       expect(await journalLines(b.id)).toEqual([]);
       expect(await available(b.userId)).toBeUndefined();
     });

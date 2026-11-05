@@ -13,6 +13,21 @@ const BUSY = new Set([
   QUERY_CANCELED,
 ]);
 
+const UNIQUE_VIOLATION = '23505';
+
+/**
+ * @function isUniqueViolation
+ * @param err - any thrown value
+ * @param constraint - the unique constraint's name
+ * @returns true when `err` is PostgreSQL refusing a duplicate on that constraint
+ */
+export function isUniqueViolation(err: unknown, constraint: string): boolean {
+  if (!(err instanceof QueryFailedError)) return false;
+  const driver = err.driverError as
+    { code?: string; constraint?: string } | undefined;
+  return driver?.code === UNIQUE_VIOLATION && driver.constraint === constraint;
+}
+
 /**
  * @function mapDatabaseError
  * @description Maps database contention errors to `SERVICE_BUSY`. Constraint violations are not mapped: repositories translate those into domain errors.

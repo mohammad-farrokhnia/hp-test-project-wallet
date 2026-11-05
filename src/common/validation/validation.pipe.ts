@@ -1,8 +1,10 @@
-import { ValidationPipe } from '@nestjs/common';
+import { ArgumentMetadata, ValidationPipe } from '@nestjs/common';
 import { ValidationError } from 'class-validator';
 import { AppError } from '../errors/app-error';
 
 const MAX_MESSAGES = 5;
+
+export const MAX_BODY_DEPTH = 8;
 
 function collect(errors: ValidationError[], prefix = ''): string[] {
   return errors.flatMap((e) => {
@@ -26,12 +28,47 @@ export function formatValidationErrors(errors: ValidationError[]): string {
 }
 
 /**
+ * @function exceedsDepth
+ * @description Whether a parsed JSON value nests deeper than `max` levels. Iterative on purpose: Nest's own pipe walks the body recursively
+ * and a body of a few thousand nested brackets overflows its stack.
+ * @param value - a parsed JSON value
+ * @param max - the deepest nesting allowed
+ * @returns true when it is deeper
+ */
+export function exceedsDepth(value: unknown, max: number): boolean {
+  const pending: [unknown, number][] = [[value, 0]];
+  for (let next = pending.pop(); next; next = pending.pop()) {
+    const [node, depth] = next;
+    if (typeof node !== 'object' || node === null) continue;
+    if (depth >= max) return true;
+    for (const child of Object.values(node)) pending.push([child, depth + 1]);
+  }
+  return false;
+}
+
+/** Strict DTO validation that refuses an over-nested body before the recursive checks run. */
+class BoundedValidationPipe extends ValidationPipe {
+  override transform(
+    value: unknown,
+    metadata: ArgumentMetadata,
+  ): Promise<unknown> {
+    if (metadata.type === 'body' && exceedsDepth(value, MAX_BODY_DEPTH)) {
+      throw new AppError(
+        'VALIDATION_ERROR',
+        'Request body is nested too deeply',
+      );
+    }
+    return super.transform(value, metadata);
+  }
+}
+
+/**
  * @function createValidationPipe
  * @description Strict DTO validation: unknown properties are rejected, types are never coerced, and failures surface as `VALIDATION_ERROR`.
  * @returns the pipe to register globally
  */
 export function createValidationPipe(): ValidationPipe {
-  return new ValidationPipe({
+  return new BoundedValidationPipe({
     whitelist: true,
     forbidNonWhitelisted: true,
     transform: true,

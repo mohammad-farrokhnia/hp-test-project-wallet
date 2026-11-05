@@ -33,6 +33,9 @@ export interface SyncUpdate {
   readonly nextCheckSeconds: number | null;
 }
 
+/** A deposit flagged `DUPLICATE_REF` is looked at again hourly: the cause is outside the PSP's answers, so there is no hurry. */
+const DUPLICATE_REF_RECHECK_SECONDS = 3600;
+
 const COLUMNS = [
   'id',
   'user_id',
@@ -68,6 +71,23 @@ export class DepositLifecycleRepository {
       .forUpdate()
       .executeTakeFirst();
     return r ? toRow(r) : null;
+  }
+
+  /**
+   * @function flagDuplicateRef
+   * @description The PSP's bank reference already credited another deposit: flag this one for a person and check it hourly. Nothing is credited.
+   */
+  async flagDuplicateRef(tx: Tx, id: string): Promise<void> {
+    await db(tx)
+      .updateTable('deposits')
+      .set({
+        needs_review: true,
+        review_reason: 'DUPLICATE_REF' satisfies DepositReviewReason,
+        next_check_at: sql<Date>`now() + make_interval(secs => ${DUPLICATE_REF_RECHECK_SECONDS})`,
+      })
+      .where('id', '=', id)
+      .where('status', '=', 'PENDING')
+      .execute();
   }
 
   /**

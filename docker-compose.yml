@@ -12,6 +12,7 @@ x-app-image: &app-image
   build: { context: ., target: runtime }
   image: wallet-app:local
   pull_policy: build # local-only tag: never try Docker Hub
+  restart: unless-stopped # api and worker come back after a crash; migrate overrides it below
   env_file:
     - path: .env
       required: false
@@ -38,6 +39,7 @@ x-app-health: &app-health
 services:
   postgres:
     image: postgres:17-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-wallet}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wallet}
@@ -52,6 +54,7 @@ services:
 
   rabbitmq:
     image: rabbitmq:4-management-alpine
+    restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
@@ -69,6 +72,7 @@ services:
   simulator:
     image: hamtapay/t103-simulator:1.0
     pull_policy: never
+    restart: unless-stopped
     environment:
       SIM_CHAOS: ${SIM_CHAOS:-default} # off | default | hostile
       SIM_TIME_SCALE: ${SIM_TIME_SCALE:-1}
@@ -118,11 +122,14 @@ services:
   # nginx renders templates/*.template with envsubst at start; only $PORT is substituted.
   app:
     image: nginx:1.27-alpine
+    restart: unless-stopped
     environment:
       PORT: ${PORT:-3000}
       NGINX_ENVSUBST_FILTER: ^PORT$$
     volumes: ["./docker/nginx.conf.template:/etc/nginx/templates/default.conf.template:ro"]
-    ports: ["${APP_PORT:-3000}:${PORT:-3000}"]
+    # Loopback by default: with INTERNAL_API_KEY empty, /internal/* is open, so only this machine may reach it.
+    # Set APP_BIND=0.0.0.0 to publish it on the network, and set INTERNAL_API_KEY first.
+    ports: ["${APP_BIND:-127.0.0.1}:${APP_PORT:-3000}:${PORT:-3000}"]
     depends_on:
       api: { condition: service_healthy }
     healthcheck:

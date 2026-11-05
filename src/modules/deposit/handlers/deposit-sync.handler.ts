@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { isUniqueViolation } from '../../../common/errors/db-error.mapper';
 import { Tx, TransactionRunner } from '../../../database/transaction-runner';
 import { PSP_CLIENT } from '../../integrations/psp';
 import type { PspClient } from '../../integrations/psp';
@@ -23,7 +24,7 @@ const SECOND_MS = 1000;
  * 3. One transaction: lock the row, decide on it AS LOCKED (`decideDepositSync`), apply with compare-and-set, and book `DEPOSIT_CREDIT` for the verified amount.
  * A callback's body never reaches this code (the job carries ids only), so a forged status or amount cannot matter.
  * Credited once however often this runs: the compare-and-set from `PENDING`, `UNIQUE (kind, ref)` on journals and `UNIQUE (psp_ref_id)` on deposits.
- * A bank reference that already credited another deposit throws, the job retries and then dead-letters: money is never booked twice.
+ * A bank reference that already credited another deposit is refused by that unique key: nothing is booked, the deposit is flagged `DUPLICATE_REF`, and the job ends normally.
  */
 @Injectable()
 export class DepositSyncHandler implements JobHandler {
@@ -46,7 +47,20 @@ export class DepositSyncHandler implements JobHandler {
     if (seen?.status !== 'PENDING' || seen.pspToken === null) return;
 
     const observation = await this.observe(seen.pspToken);
-    await this.runner.run((tx) => this.apply(tx, id, observation));
+    try {
+      await this.runner.run((tx) => this.apply(tx, id, observation));
+    } catch (err) {
+      if (!isUniqueViolation(err, 'deposits_psp_ref_id_key')) throw err;
+      await this.refuseDuplicateReference(id);
+    }
+  }
+
+  /** `UNIQUE (psp_ref_id)` refused a second credit for one bank reference: nothing was booked; a person decides. */
+  private async refuseDuplicateReference(id: string): Promise<void> {
+    await this.runner.run((tx) => this.lifecycle.flagDuplicateRef(tx, id));
+    this.logger.error(
+      `ALERT deposit ${id}: the PSP verified it with a bank reference that already credited another deposit. Refused, flagged DUPLICATE_REF.`,
+    );
   }
 
   private async observe(token: string): Promise<Observation> {

@@ -18,6 +18,7 @@ export interface SyncState {
   readonly returned: boolean;
   readonly attemptInFlight: boolean;
   readonly lastAttemptRejected: boolean;
+  readonly uncertainTooLong: boolean;
 }
 
 export type SyncJournal = 'SETTLE' | 'RELEASE' | 'RETURN' | 'LATE_SUCCESS';
@@ -110,8 +111,19 @@ export function decideSync(s: SyncState, found: Lookup): SyncDecision {
   }
 }
 
-/** GET 404 for a withdrawal that is not final. */
+/**
+ * GET 404 for a withdrawal that is not final. For PROCESSING the provider had accepted it, and in hostile mode a transfer whose
+ * create timed out answers 404 for a while after a replay proved it exists: so a young 404 only checks again in 30 s,
+ * and only one that outlasts `REVIEW_AFTER_MINUTES` is flagged. Money never moves on a 404 here.
+ */
 function notFound(s: SyncState): SyncDecision {
+  if (s.status === 'PROCESSING' && !s.uncertainTooLong) {
+    return {
+      rule: 'UNKNOWN_QUIET',
+      ...none,
+      nextCheckSeconds: SCHEDULE.unavailable,
+    };
+  }
   if (s.status === 'PROCESSING') {
     return {
       rule: 'UNKNOWN_AFTER_ACCEPT',
@@ -183,7 +195,10 @@ function afterFailure(found: Lookup): SyncDecision {
   return { rule: 'FINAL', ...none, nextCheckSeconds: null };
 }
 
-/** A SUCCEEDED withdrawal is final, but watched for a bank return. */
+/**
+ * A SUCCEEDED withdrawal is final, but watched for a bank return. A 404 here is the same provider lag as for PROCESSING
+ * (a transfer the provider already reported SUCCEEDED answered 404 minutes later): quiet inside `REVIEW_AFTER_MINUTES`, flagged after.
+ */
 function afterSuccess(s: SyncState, found: Lookup): SyncDecision {
   if (s.returned) return { rule: 'FINAL', ...none, nextCheckSeconds: null };
   if (found.kind === 'FOUND' && found.status === 'RETURNED') {
@@ -193,6 +208,13 @@ function afterSuccess(s: SyncState, found: Lookup): SyncDecision {
       journals: ['RETURN'],
       returnReason: found.reason,
       nextCheckSeconds: null,
+    };
+  }
+  if (found.kind === 'NOT_FOUND' && !s.uncertainTooLong) {
+    return {
+      rule: 'UNKNOWN_QUIET',
+      ...none,
+      nextCheckSeconds: SCHEDULE.unavailable,
     };
   }
   if (found.kind === 'NOT_FOUND') {
