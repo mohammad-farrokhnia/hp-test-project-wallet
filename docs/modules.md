@@ -101,10 +101,12 @@ What gets stored: 2xx responses and state-dependent 422s (`INSUFFICIENT_FUNDS`, 
 
 | Unit | Responsibility |
 |---|---|
-| `OutboxService.add(tx, {exchange, routingKey, aggregate, payload})` | Writes a message in the caller's transaction (exported) |
+| `OutboxService.add(tx, {exchange, routingKey, aggregate, payload})` | Writes a message in the caller's transaction (exported, every role); returns the outbox id, which is the message id. Payload is ids only (string values) |
 | `OutboxRelay` (worker) | Every 200 ms–1 s: claim up to 100 unsent rows (`FOR UPDATE SKIP LOCKED`, set `claimed_until`), publish with confirms, mark `published_at`. Claim expiry after 30 s makes a crashed relay's rows claimable again |
-| `RabbitTopology` | Declares exchanges, queues and bindings idempotently at startup |
-| `JobConsumer` base | prefetch 10; parses the envelope; calls the handler; **acks only after the handler's transaction commits**. A thrown error nacks with requeue; past the queue's delivery limit (5) the message dead-letters to `job.dead` and is logged. The row's `next_check_at` makes the sweeper retry later regardless |
+| `RabbitTopology` (`topology.ts`) | The layout below as data; `declareTopology` runs on every (re)connect. Same arguments are a no-op; changed arguments fail with PRECONDITION_FAILED instead of silently keeping the old queue |
+| `RabbitConnection` (worker) | One amqplib recovering connection: boot never waits for the broker, reconnects with backoff (200 ms to 30 s), redeclares the topology after each connect, reopens the confirm channel after it closes. Host and port from `RABBITMQ_HOST`/`RABBITMQ_PORT` |
+| `RabbitPublisher` (worker) | Publisher confirms: resolves only on the broker's ack. Persistent, `mandatory`, `messageId`. A nack, no confirm within `RABBITMQ_PUBLISH_TIMEOUT_MS` (5 s) or a lost channel is retried `RABBITMQ_PUBLISH_RETRIES` (3) times with the same message id; an unroutable message fails at once (`UNROUTABLE`) |
+| `JobConsumer` base | prefetch 10; parses the envelope; calls the handler; **acks only after the handler's transaction commits**. A thrown error nacks with requeue; past the queue's delivery limit (5) the message dead-letters to `job.dead` and is logged. The row's `next_check_at` makes the sweeper retry later regardless. **Measured on RabbitMQ 4 (M2): a `nack` with requeue does not count toward the delivery limit; only a delivery lost without an ack does (consumer or channel died).** So M4 must count failures itself (e.g. `x-delivery-count` / a retry header) or nack without requeue into a retry route, or a poison message cycles forever |
 | `InboxService.markProcessed(tx, consumer, messageId)` | Bonus: returns false if already processed |
 
 **Topology.**

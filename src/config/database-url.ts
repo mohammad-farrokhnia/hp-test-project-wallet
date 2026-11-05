@@ -20,6 +20,21 @@ export function buildDatabaseUrl(p: PostgresParts): string {
 }
 
 /**
+ * @function buildAmqpUrl
+ * @description Assembles an `amqp://` URL for the default vhost, percent-encoding the credentials.
+ */
+export function buildAmqpUrl(p: {
+  host: string;
+  port: number;
+  user: string;
+  password: string;
+}): string {
+  const user = encodeURIComponent(p.user);
+  const password = encodeURIComponent(p.password);
+  return `amqp://${user}:${password}@${p.host}:${p.port}`;
+}
+
+/**
  * @function databaseUrlFromEnv
  * @description Builds the connection string from `POSTGRES_*` variables with the same defaults as the app config, but only when `POSTGRES_DB` is set. Lets integration specs skip when no database is configured.
  * @param env - the environment to read

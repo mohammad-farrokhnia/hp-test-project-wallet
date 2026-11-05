@@ -55,7 +55,7 @@ Stop with `docker compose down` (add `-v` to also delete the database and queue 
 | `postgres`, `rabbitmq` | data stores |
 | `simulator` | the PSP and payout provider simulator (`SIM_CHAOS`: `off`, `default`, `hostile`) |
 
-Postgres, the RabbitMQ UI and the simulator are published on `127.0.0.1` only. Find a port with `docker compose port postgres 5432`, or pin it with `POSTGRES_PORT`, `RABBITMQ_UI_PORT` or `SIMULATOR_PORT` in `.env`.
+Postgres, RabbitMQ (AMQP and UI) and the simulator are published on `127.0.0.1` only. Find a port with `docker compose port postgres 5432`, or pin it with `POSTGRES_PORT`, `RABBITMQ_PORT`, `RABBITMQ_UI_PORT` or `SIMULATOR_PORT` in `.env`.
 
 ## Configuration
 
@@ -65,7 +65,7 @@ cp .env.example .env
 
 `.env` is optional for Docker (every value has a default) and required to run the app or tests on your machine. Compose reads it too, so credentials, ports and limits are set in one place. Every variable is validated at startup and the app refuses to start on a missing or malformed one (`src/config/env.schema.ts`).
 
-The database connection is built from `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB`, so `POSTGRES_PORT` is the single port: compose publishes Postgres on it and the app connects to it. `RABBITMQ_URL` and the `*_BASE_URL` values in `.env` point at `localhost` for running on your machine. Inside Docker, compose supplies the container-network host and port itself, so those lines are ignored there.
+The database connection is built from `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB`, so `POSTGRES_PORT` is the single port: compose publishes Postgres on it and the app connects to it. RabbitMQ works the same way: `RABBITMQ_HOST`, `RABBITMQ_PORT`, `RABBITMQ_USER` and `RABBITMQ_PASSWORD`, with `RABBITMQ_PORT` the AMQP port compose publishes and the app uses. The `*_BASE_URL` values in `.env` point at `localhost` for running on your machine. Inside Docker, compose supplies the container-network host and port itself, so those lines are ignored there.
 
 ## Running on your machine
 
@@ -94,7 +94,6 @@ Unit tests need nothing. The database integration tests (`*.int.spec.ts`) run ag
 
 ```dotenv
 POSTGRES_DB=wallet_test
-RABBITMQ_URL=amqp://guest:guest@localhost:5672
 PSP_BASE_URL=http://localhost:8080
 PAYOUT_BASE_URL=http://localhost:8080
 PUBLIC_BASE_URL=http://localhost:3000

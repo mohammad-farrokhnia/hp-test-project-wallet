@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { buildDatabaseUrl } from './database-url';
+import { buildAmqpUrl, buildDatabaseUrl } from './database-url';
 import { Env, envSchema } from './env.schema';
 
 export class AppConfig {
@@ -11,7 +11,11 @@ export class AppConfig {
     lockTimeoutMs: number;
     statementTimeoutMs: number;
   };
-  readonly rabbit: { url: string };
+  readonly rabbit: {
+    url: string;
+    publishTimeoutMs: number;
+    publishRetries: number;
+  };
   readonly psp: { baseUrl: string };
   readonly payout: { baseUrl: string; webhookSecret: string };
   readonly internalApiKey: string | null;
@@ -47,7 +51,16 @@ export class AppConfig {
       lockTimeoutMs: e.DB_LOCK_TIMEOUT_MS,
       statementTimeoutMs: e.DB_STATEMENT_TIMEOUT_MS,
     };
-    this.rabbit = { url: e.RABBITMQ_URL };
+    this.rabbit = {
+      url: buildAmqpUrl({
+        host: e.RABBITMQ_HOST,
+        port: e.RABBITMQ_PORT,
+        user: e.RABBITMQ_USER,
+        password: e.RABBITMQ_PASSWORD,
+      }),
+      publishTimeoutMs: e.RABBITMQ_PUBLISH_TIMEOUT_MS,
+      publishRetries: e.RABBITMQ_PUBLISH_RETRIES,
+    };
     this.psp = { baseUrl: e.PSP_BASE_URL.replace(/\/$/, '') };
     this.payout = {
       baseUrl: e.PAYOUT_BASE_URL.replace(/\/$/, ''),

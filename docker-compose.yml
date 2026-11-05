@@ -4,7 +4,7 @@
 # Config comes from .env (optional, see .env.example): compose reads it for ${VAR}
 # interpolation, and env_file passes the app's own settings (limits, timeouts, expiry)
 # through, so their defaults stay in src/config/env.schema.ts. No .env = working defaults.
-# POSTGRES_HOST, POSTGRES_PORT, RABBITMQ_URL and the *_BASE_URL values are NOT read from .env:
+# POSTGRES_HOST/PORT, RABBITMQ_HOST/PORT and the *_BASE_URL values are NOT read from .env:
 # there they point at localhost (app on the host); in the compose network they name containers.
 name: wallet
 
@@ -20,7 +20,8 @@ x-app-env: &app-env
   PORT: ${PORT:-3000}
   POSTGRES_HOST: postgres
   POSTGRES_PORT: "5432" # container port; .env POSTGRES_PORT is the host-published one
-  RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:-guest}@rabbitmq:5672
+  RABBITMQ_HOST: rabbitmq
+  RABBITMQ_PORT: "5672" # container port; .env RABBITMQ_PORT is the host-published one
   # One simulator serves both the PSP and the payout service.
   PSP_BASE_URL: http://simulator:8080
   PAYOUT_BASE_URL: http://simulator:8080
@@ -55,7 +56,9 @@ services:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
     volumes: [rabbitmq:/var/lib/rabbitmq]
-    ports: ["127.0.0.1:${RABBITMQ_UI_PORT:-0}:15672"] # docker compose port rabbitmq 15672
+    ports:
+      - "127.0.0.1:${RABBITMQ_PORT:-0}:5672" # AMQP, for the app on the host: docker compose port rabbitmq 5672
+      - "127.0.0.1:${RABBITMQ_UI_PORT:-0}:15672" # management UI: docker compose port rabbitmq 15672
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 5s

@@ -351,7 +351,7 @@ id uuid PK · from_user_id · to_user_id · currency · amount_minor `> 0` · jo
 | Column | Type | Null | Notes |
 |---|---|---|---|
 | id | bigint identity | no | PK; also the message id |
-| exchange | text | no | `t103.jobs` \| `t103.events` |
+| exchange | text | no | `wallet.jobs` \| `wallet.events` |
 | routing_key | text | no | e.g. `job.withdrawal.submit` |
 | aggregate_type, aggregate_id | text | no | e.g. `WITHDRAWAL`, the id |
 | payload | jsonb | no | ids only, never amounts to act on |

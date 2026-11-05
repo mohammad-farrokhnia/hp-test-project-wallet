@@ -12,6 +12,7 @@ import {
   IdempotencyModule,
 } from './modules/idempotency';
 import { LedgerModule } from './modules/ledger';
+import { MessagingModule, RabbitModule } from './modules/messaging';
 import { OperationsModule } from './modules/operations';
 import { WalletModule } from './modules/wallet';
 
@@ -24,6 +25,7 @@ const SHARED_MODULES: Type[] = [
   DatabaseModule,
   LedgerModule,
   IdempotencyModule,
+  MessagingModule,
   HealthModule,
 ];
 
@@ -34,7 +36,7 @@ const API_MODULES: Type[] = [
   WalletModule,
 ];
 
-const WORKER_MODULES: Type[] = [IdempotencyCleanupModule];
+const WORKER_MODULES: Type[] = [IdempotencyCleanupModule, RabbitModule];
 
 /**
  * @class AppModule

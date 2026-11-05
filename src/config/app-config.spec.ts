@@ -32,8 +32,8 @@ describe('loadConfig', () => {
   });
 
   it('fails fast on a missing variable', () => {
-    const { RABBITMQ_URL: _omit, ...rest } = TEST_ENV;
-    expect(() => loadConfig(rest)).toThrow(/RABBITMQ_URL/);
+    const { PSP_BASE_URL: _omit, ...rest } = TEST_ENV;
+    expect(() => loadConfig(rest)).toThrow(/PSP_BASE_URL/);
   });
 
   it('builds the database url from the POSTGRES_* parts', () => {
@@ -55,6 +55,24 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ ...TEST_ENV, POSTGRES_PORT: port })).toThrow(
       /POSTGRES_PORT/,
     );
+  });
+
+  it('builds the RabbitMQ url from the RABBITMQ_* parts', () => {
+    expect(loadConfig(TEST_ENV).rabbit).toEqual({
+      url: 'amqp://guest:guest@localhost:5672',
+      publishTimeoutMs: 5000,
+      publishRetries: 3,
+    });
+    const c = loadConfig({
+      ...TEST_ENV,
+      RABBITMQ_HOST: 'mq',
+      RABBITMQ_PORT: '55672',
+      RABBITMQ_USER: 'u',
+      RABBITMQ_PASSWORD: 'p@ss',
+      RABBITMQ_PUBLISH_RETRIES: '0',
+    });
+    expect(c.rabbit.url).toBe('amqp://u:p%40ss@mq:55672');
+    expect(c.rabbit.publishRetries).toBe(0);
   });
 
   it('rejects decimal money', () => {

@@ -9,6 +9,8 @@ const toman = (def: string) =>
 const micro = (def: string) =>
   wholeNumber.default(def).transform((s) => BigInt(s));
 const int = (def: number) => z.coerce.number().int().positive().default(def);
+const port = (def: number) =>
+  z.coerce.number().int().min(1).max(65535).default(def);
 
 export const envSchema = z.object({
   APP_ROLE: z.enum(['api', 'worker', 'all']).default('api'),
@@ -20,11 +22,16 @@ export const envSchema = z.object({
   // The connection string is built from these (src/config/database-url.ts), so
   // the port has one source of truth, shared with docker compose.
   POSTGRES_HOST: z.string().min(1).default('localhost'),
-  POSTGRES_PORT: z.coerce.number().int().min(1).max(65535).default(5432),
+  POSTGRES_PORT: port(5432),
   POSTGRES_USER: z.string().min(1).default('wallet'),
   POSTGRES_PASSWORD: z.string().min(1).default('wallet'),
   POSTGRES_DB: z.string().min(1).default('wallet'),
-  RABBITMQ_URL: z.url(),
+  RABBITMQ_HOST: z.string().min(1).default('localhost'),
+  RABBITMQ_PORT: port(5672),
+  RABBITMQ_USER: z.string().min(1).default('guest'),
+  RABBITMQ_PASSWORD: z.string().min(1).default('guest'),
+  RABBITMQ_PUBLISH_TIMEOUT_MS: int(5000),
+  RABBITMQ_PUBLISH_RETRIES: z.coerce.number().int().min(0).max(10).default(3),
 
   PSP_BASE_URL: z.url(),
   PAYOUT_BASE_URL: z.url(),

@@ -78,6 +78,20 @@ export interface Journals {
   reverses_journal_id: Int8 | null;
 }
 
+export interface Outbox {
+  aggregate_id: string;
+  aggregate_type: string;
+  attempts: Generated<number>;
+  claimed_until: Timestamp | null;
+  created_at: Generated<Timestamp>;
+  exchange: string;
+  id: Generated<Int8>;
+  last_error: string | null;
+  payload: Json;
+  published_at: Timestamp | null;
+  routing_key: string;
+}
+
 export interface Postings {
   account_id: Int8;
   account_kind: string;
@@ -95,5 +109,6 @@ export interface DB {
   adjustments: Adjustments;
   idempotency_keys: IdempotencyKeys;
   journals: Journals;
+  outbox: Outbox;
   postings: Postings;
 }
