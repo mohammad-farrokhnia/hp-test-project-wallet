@@ -180,7 +180,7 @@ What gets stored: 2xx responses and state-dependent 422s (`INSUFFICIENT_FUNDS`, 
    - `REJECTED` → schedule an immediate sync. FAILED only after a GET confirms 404.
    - `AMBIGUOUS` → stays `SUBMITTING`, `next_check_at` by backoff.
 
-**`WithdrawalSyncHandler`:**
+**`WithdrawalSyncHandler`** (`domain/withdrawal-state-machine.ts` holds the W5–W11 decisions as a pure function; the handler applies them with compare-and-set under the row lock; journals: SETTLE = FROZEN −(x+fee), PAYOUT_CLEARING +x, FEE_REVENUE +fee; RELEASE = FROZEN → AVAILABLE; RETURN through `ledger.creditUser` from PAYOUT_CLEARING, so it pays DEBT first like every credit). Return watch: `WITHDRAWAL_RETURN_WATCH_HOURS` (24); past it, a sync without a webhook stops checking (W15). `WithdrawalDueWork` is the sweeper's source (bump first; submit while PENDING, else sync):
 1. Read the row. A non-final status, `SUCCEEDED` within the return window, or any status when a signed webhook triggered the job (that is how W12 is found) needs a GET; anything else acks and stops.
 2. `PayoutClient.getTransfer`:
    - a snapshot goes to `WithdrawalOutcomeService.apply`;
@@ -190,7 +190,9 @@ What gets stored: 2xx responses and state-dependent 422s (`INSUFFICIENT_FUNDS`, 
 
 **`PayoutWebhookController`:**
 1. Verify `x-signature` = hex HMAC-SHA256(raw body, secret) in constant time. Invalid → `inbound_events` (`REJECTED_SIGNATURE`) and 401.
-2. Valid → record it; look up the withdrawal by `requestId`. Unknown → `UNKNOWN_REFERENCE`, 200. Known → `next_check_at = now()` plus outbox `job.withdrawal.sync`, 200. Target: under 50 ms.
+2. Valid → in one transaction: record it; look up the withdrawal by `requestId`. Unknown (or not a uuid) → `UNKNOWN_REFERENCE`, 200. Known → `next_check_at = now()` plus outbox `job.withdrawal.sync` with `trigger: WEBHOOK` (so the sync pulls even a final withdrawal), 200 `{received: true}`. The status in the body is never applied. Target: under 50 ms.
+
+The verifier compares the decoded digests with `timingSafeEqual` after checking for exactly 64 hex characters; it is tested against signatures captured from the simulator. A body that is not JSON is refused by the body parser (400) before it can be recorded.
 
 ### deposit
 **Owns:** `deposits`. **Depends on:** ledger, idempotency, messaging, psp, inbound events.

@@ -57,6 +57,20 @@ export class PayoutAttemptsRepository {
       .execute();
   }
 
+  async lastOutcome(
+    tx: Tx,
+    withdrawalId: string,
+  ): Promise<AttemptOutcome | null> {
+    const row = await db(tx)
+      .selectFrom('payout_attempts')
+      .select('outcome')
+      .where('withdrawal_id', '=', withdrawalId)
+      .orderBy('attempt_no', 'desc')
+      .limit(1)
+      .executeTakeFirst();
+    return (row?.outcome as AttemptOutcome | null | undefined) ?? null;
+  }
+
   /**
    * @function inFlight
    * @description True while an unfinished attempt is younger than the lease:

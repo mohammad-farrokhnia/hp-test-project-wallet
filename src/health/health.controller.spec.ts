@@ -6,6 +6,7 @@ import { App } from 'supertest/types';
 import { AppModule, AppRole } from '../app.module';
 import { TEST_ENV } from '../config/testing';
 import { fakeDataSource } from '../database/testing';
+import { withoutBackgroundWork } from '../testing/without-background-work';
 import { HealthController } from './health.controller';
 import { ReadinessService } from './readiness.service';
 
@@ -27,9 +28,9 @@ describe.each(['api', 'worker', 'all'] as const)(
     let databaseUp = true;
 
     beforeAll(async () => {
-      const ref = await Test.createTestingModule({
-        imports: [AppModule.forRole(role)],
-      })
+      const ref = await withoutBackgroundWork(
+        Test.createTestingModule({ imports: [AppModule.forRole(role)] }),
+      )
         .overrideProvider(DataSource)
         .useValue(
           fakeDataSource(() =>

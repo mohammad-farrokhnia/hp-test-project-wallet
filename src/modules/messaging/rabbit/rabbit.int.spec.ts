@@ -6,6 +6,7 @@ import { DataSource } from 'typeorm';
 import { AppModule } from '../../../app.module';
 import { loadConfig } from '../../../config/app-config';
 import { fakeDataSource } from '../../../database/testing';
+import { withoutBackgroundWork } from '../../../testing/without-background-work';
 import {
   buildTopology,
   DEAD_LETTER_EXCHANGE,
@@ -214,9 +215,9 @@ describe('RabbitMQ topology and publisher (real broker)', () => {
   });
 
   it('the worker role declares the app topology when it boots', async () => {
-    const ref = await Test.createTestingModule({
-      imports: [AppModule.forRole('worker')],
-    })
+    const ref = await withoutBackgroundWork(
+      Test.createTestingModule({ imports: [AppModule.forRole('worker')] }),
+    )
       .overrideProvider(DataSource)
       .useValue(fakeDataSource())
       .compile();

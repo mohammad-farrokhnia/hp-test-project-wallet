@@ -23,8 +23,10 @@ import { SchedulerModule } from './modules/scheduler';
 import { WalletModule } from './modules/wallet';
 import {
   WithdrawalApiModule,
+  WithdrawalDueWork,
   WithdrawalModule,
   WithdrawalSubmitHandler,
+  WithdrawalSyncHandler,
 } from './modules/withdrawal';
 
 export type AppRole = Env['APP_ROLE'];
@@ -53,10 +55,13 @@ const WORKER_MODULES: (Type | DynamicModule)[] = [
   RabbitModule,
   OutboxRelayModule,
   JobsModule.register({
-    handlers: [WithdrawalSubmitHandler],
+    handlers: [WithdrawalSubmitHandler, WithdrawalSyncHandler],
     imports: [WithdrawalModule],
   }),
-  SchedulerModule.register({ sources: [] }),
+  SchedulerModule.register({
+    sources: [WithdrawalDueWork],
+    imports: [WithdrawalModule],
+  }),
 ];
 
 /**

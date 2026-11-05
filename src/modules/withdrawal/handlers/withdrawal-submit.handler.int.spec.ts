@@ -20,6 +20,7 @@ import { OutboxRepository } from '../../messaging/outbox/outbox.repository';
 import { buildPolicies } from '../domain/withdrawal-policy';
 import { DailyLimitRepository } from '../repositories/daily-limit.repository';
 import { PayoutAttemptsRepository } from '../repositories/payout-attempts.repository';
+import { WithdrawalLifecycleRepository } from '../repositories/withdrawal-lifecycle.repository';
 import { WithdrawalsRepository } from '../repositories/withdrawals.repository';
 import { WithdrawalService } from '../withdrawal.service';
 import { WithdrawalSubmitHandler } from './withdrawal-submit.handler';
@@ -118,6 +119,7 @@ describeDb('WithdrawalSubmitHandler (real PostgreSQL)', () => {
     new WithdrawalSubmitHandler(
       runner,
       new WithdrawalsRepository(),
+      new WithdrawalLifecycleRepository(),
       new PayoutAttemptsRepository(),
       outbox,
       payout,
@@ -206,7 +208,6 @@ describeDb('WithdrawalSubmitHandler (real PostgreSQL)', () => {
     const { id } = await pending();
     let seenDuringCall: unknown;
     const payout = new FakePayout(async (r) => {
-      // Another connection, mid-call: the attempt and SUBMITTING are already committed.
       seenDuringCall = { state: await state(id), attempts: await attempts(id) };
       return accepted(r);
     });

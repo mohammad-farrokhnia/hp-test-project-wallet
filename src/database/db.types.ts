@@ -67,6 +67,18 @@ export interface IdempotencyKeys {
   status: string;
 }
 
+export interface InboundEvents {
+  event_id: string | null;
+  headers: Json;
+  id: Generated<Int8>;
+  outcome: string;
+  raw_body: string;
+  received_at: Generated<Timestamp>;
+  reference: string | null;
+  signature_valid: boolean | null;
+  source: string;
+}
+
 export interface Journals {
   created_at: Generated<Timestamp>;
   currency: string;
@@ -157,6 +169,7 @@ export interface DB {
   accounts: Accounts;
   adjustments: Adjustments;
   idempotency_keys: IdempotencyKeys;
+  inbound_events: InboundEvents;
   journals: Journals;
   outbox: Outbox;
   payout_attempts: PayoutAttempts;

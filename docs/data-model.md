@@ -173,7 +173,7 @@ One row per business event that moves money. Immutable.
 | `WITHDRAWAL_FREEZE` | withdrawal | AVAILABLE −(x + fee) · FROZEN +(x + fee) |
 | `WITHDRAWAL_SETTLE` | withdrawal | FROZEN −(x + fee) · PAYOUT_CLEARING +x · FEE_REVENUE +fee |
 | `WITHDRAWAL_RELEASE` | withdrawal | FROZEN −(x + fee) · AVAILABLE +(x + fee) |
-| `WITHDRAWAL_RETURN` | withdrawal | PAYOUT_CLEARING −x · AVAILABLE +x (the fee is kept: the payout happened) |
+| `WITHDRAWAL_RETURN` | withdrawal | PAYOUT_CLEARING −x · DEBT +min(debt, x) · AVAILABLE +rest (the fee is kept: the payout happened; incoming money pays debt first) |
 | `WITHDRAWAL_LATE_SUCCESS` | withdrawal | PAYOUT_CLEARING +x · AVAILABLE −min(available, x) · DEBT −rest |
 | `TRANSFER` (bonus) | transfer | A.AVAILABLE −x · B.DEBT +min · B.AVAILABLE +rest |
 
@@ -382,7 +382,8 @@ Every PSP callback and payout webhook exactly as received, rejected ones include
 | outcome | text | no | `ACCEPTED`, `REJECTED_SIGNATURE`, `UNKNOWN_REFERENCE`, `MISMATCH`, `IGNORED_FINAL` |
 | received_at | timestamptz | no | |
 
-- `INDEX (reference, received_at)`. Retention 30 days.
+- `INDEX (reference, received_at)`, `INDEX (received_at)`. Retention 30 days.
+- `CHECK`: a payout webhook always has `signature_valid`; `REJECTED_SIGNATURE` only with `signature_valid = false`.
 
 ### `state_transitions` (shared, append-only)
 One row per status change of a deposit or withdrawal, so "what happened to this withdrawal?" is one query.

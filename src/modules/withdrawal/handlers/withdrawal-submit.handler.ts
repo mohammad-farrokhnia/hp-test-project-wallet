@@ -24,6 +24,7 @@ import {
   AttemptOutcome,
   PayoutAttemptsRepository,
 } from '../repositories/payout-attempts.repository';
+import { WithdrawalLifecycleRepository } from '../repositories/withdrawal-lifecycle.repository';
 import { WithdrawalsRepository } from '../repositories/withdrawals.repository';
 
 /** A submit claimed in transaction 1, to be sent and then recorded. */
@@ -54,6 +55,7 @@ export class WithdrawalSubmitHandler implements JobHandler {
   constructor(
     private readonly runner: TransactionRunner,
     private readonly withdrawals: WithdrawalsRepository,
+    private readonly lifecycle: WithdrawalLifecycleRepository,
     private readonly attempts: PayoutAttemptsRepository,
     private readonly outbox: OutboxService,
     @Inject(PAYOUT_CLIENT) private readonly payout: PayoutClient,
@@ -77,7 +79,7 @@ export class WithdrawalSubmitHandler implements JobHandler {
   }
 
   private async claim(tx: Tx, id: string): Promise<Claimed | null> {
-    const w = await this.withdrawals.lockForSubmit(tx, id);
+    const w = await this.lifecycle.lockForSubmit(tx, id);
     if (!w) return null; // unknown, or another worker holds it
     const eligible =
       w.status === 'PENDING' ||
@@ -98,12 +100,7 @@ export class WithdrawalSubmitHandler implements JobHandler {
       attemptNo,
       this.payout.requestBody(request),
     );
-    await this.withdrawals.startSubmitting(
-      tx,
-      id,
-      attemptNo,
-      this.leaseSeconds,
-    );
+    await this.lifecycle.startSubmitting(tx, id, attemptNo, this.leaseSeconds);
     this.logger.log(
       `submitting ${id} attempt ${attemptNo} to ${maskDestination(w.destination)}`,
     );
@@ -121,7 +118,7 @@ export class WithdrawalSubmitHandler implements JobHandler {
       error: o.error,
       responseBody: o.responseBody,
     });
-    const status = await this.withdrawals.lockStatus(tx, id);
+    const status = await this.lifecycle.lockStatus(tx, id);
     if (status !== 'SUBMITTING') return;
 
     switch (o.kind) {
@@ -130,7 +127,7 @@ export class WithdrawalSubmitHandler implements JobHandler {
           this.logger.warn(
             `${id}: replay differs in ${o.mismatches.join(', ')}; flagged for review`,
           );
-          await this.withdrawals.flagReplayMismatch(
+          await this.lifecycle.flagReplayMismatch(
             tx,
             id,
             AFTER_MISMATCH_SECONDS,
@@ -168,7 +165,7 @@ export class WithdrawalSubmitHandler implements JobHandler {
     id: string,
     s: TransferSnapshot,
   ): Promise<void> {
-    return this.withdrawals.markProcessing(
+    return this.lifecycle.markProcessing(
       tx,
       id,
       { status: s.status, trackingId: s.trackingId },
