@@ -6,7 +6,7 @@ import {
   type LookupOutcome,
   type PayoutClient,
 } from '../../integrations/payout';
-import { LedgerService } from '../../ledger';
+import { clawbackLines, LedgerService } from '../../ledger';
 import {
   Envelope,
   JOBS_EXCHANGE,
@@ -23,6 +23,7 @@ import { PayoutAttemptsRepository } from '../repositories/payout-attempts.reposi
 import { WithdrawalLifecycleRepository } from '../repositories/withdrawal-lifecycle.repository';
 import type { SyncRow } from '../repositories/withdrawals.repository';
 import { WEBHOOK_TRIGGER } from '../webhook/payout-webhook.service';
+import { RESUBMIT_AFTER_NOT_FOUND } from './withdrawal-submit.handler';
 
 const HOUR_MS = 3_600_000;
 
@@ -114,6 +115,7 @@ export class WithdrawalSyncHandler implements JobHandler {
           : undefined,
       returnReason: decision.returnReason,
       review: decision.review,
+      lateSuccess: decision.lateSuccess,
       nextCheckSeconds: decision.nextCheckSeconds,
     });
     if (!applied) return;
@@ -131,7 +133,7 @@ export class WithdrawalSyncHandler implements JobHandler {
         exchange: JOBS_EXCHANGE,
         routingKey: 'job.withdrawal.submit',
         aggregate: { type: 'WITHDRAWAL', id },
-        payload: { withdrawalId: id },
+        payload: { withdrawalId: id, after: RESUBMIT_AFTER_NOT_FOUND },
       });
     }
     if (decision.rule !== 'W7' && decision.rule !== 'IGNORED') {
@@ -150,6 +152,35 @@ export class WithdrawalSyncHandler implements JobHandler {
     const user = await this.ledger.ensureUserAccounts(tx, w.userId, currency);
     const description = `Withdrawal ${w.id}`;
 
+    if (journal === 'LATE_SUCCESS') {
+      const locked = await this.ledger.lockUserAccounts(tx, w.userId, currency);
+      const clearing = await this.ledger.systemAccountId(
+        tx,
+        'PAYOUT_CLEARING',
+        currency,
+      );
+      await this.ledger.post(tx, {
+        kind: 'WITHDRAWAL_LATE_SUCCESS',
+        refId: w.id,
+        currency,
+        description: `Late success of withdrawal ${w.id}`,
+        lines: [
+          { accountId: clearing, amount: w.amount },
+          ...clawbackLines(
+            {
+              availableId: user.available,
+              debtId: user.debt,
+              available: locked.available,
+            },
+            w.amount,
+          ),
+        ],
+      });
+      this.logger.error(
+        `ALERT ${w.id}: paid after it was FAILED (Ambiguity #1); ${w.amount.toString()} clawed back from ${w.userId}, review needed`,
+      );
+      return;
+    }
     if (journal === 'RETURN') {
       await this.ledger.creditUser(tx, {
         userId: w.userId,

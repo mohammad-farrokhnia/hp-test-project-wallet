@@ -20,7 +20,7 @@ export interface SyncState {
   readonly lastAttemptRejected: boolean;
 }
 
-export type SyncJournal = 'SETTLE' | 'RELEASE' | 'RETURN';
+export type SyncJournal = 'SETTLE' | 'RELEASE' | 'RETURN' | 'LATE_SUCCESS';
 
 export interface SyncDecision {
   readonly rule: string;
@@ -31,7 +31,8 @@ export interface SyncDecision {
   readonly releaseUsage: boolean;
   readonly returnReason?: string | null;
   readonly resubmit: boolean;
-  readonly review?: 'UNKNOWN_AFTER_SUCCESS';
+  readonly review?: 'UNKNOWN_AFTER_SUCCESS' | 'LATE_SUCCESS';
+  readonly lateSuccess?: boolean;
   readonly nextCheckSeconds: number | null;
 }
 
@@ -56,9 +57,7 @@ const none = { journals: [], releaseUsage: false, resubmit: false } as const;
  * @returns what to do
  */
 export function decideSync(s: SyncState, found: Lookup): SyncDecision {
-  if (s.status === 'FAILED') {
-    return { rule: 'FINAL', ...none, nextCheckSeconds: null };
-  }
+  if (s.status === 'FAILED') return afterFailure(found);
   if (s.status === 'SUCCEEDED') return afterSuccess(s, found);
   if (!OPEN.has(s.status))
     return { rule: 'FINAL', ...none, nextCheckSeconds: null };
@@ -145,6 +144,43 @@ function notFound(s: SyncState): SyncDecision {
     resubmit: true,
     nextCheckSeconds: SCHEDULE.resubmitted,
   };
+}
+
+/**
+ * The provider paid a withdrawal we had failed and released. Only a
+ * signed webhook makes the sync pull a FAILED one. The money left, so claw it back: AVAILABLE
+ * first, the rest as DEBT (`clawbackLines`). The status becomes SUCCEEDED, flagged for a person.
+ * The daily limit is not reserved again. RETURNED means it was paid and came back: claw back,
+ * then credit the return, in one transaction.
+ */
+function afterFailure(found: Lookup): SyncDecision {
+  if (found.kind !== 'FOUND')
+    return { rule: 'FINAL', ...none, nextCheckSeconds: null };
+  const lateSuccess = {
+    to: 'SUCCEEDED',
+    lateSuccess: true,
+    review: 'LATE_SUCCESS',
+    releaseUsage: false,
+    resubmit: false,
+  } as const;
+  if (found.status === 'SUCCEEDED') {
+    return {
+      rule: 'W12',
+      ...lateSuccess,
+      journals: ['LATE_SUCCESS'],
+      nextCheckSeconds: SCHEDULE.returnWatch,
+    };
+  }
+  if (found.status === 'RETURNED') {
+    return {
+      rule: 'W12',
+      ...lateSuccess,
+      journals: ['LATE_SUCCESS', 'RETURN'],
+      returnReason: found.reason,
+      nextCheckSeconds: null,
+    };
+  }
+  return { rule: 'FINAL', ...none, nextCheckSeconds: null };
 }
 
 /** A SUCCEEDED withdrawal is final, but watched for a bank return. */

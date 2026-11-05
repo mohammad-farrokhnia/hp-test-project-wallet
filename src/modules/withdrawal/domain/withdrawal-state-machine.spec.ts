@@ -151,8 +151,34 @@ describe('decideSync: the withdrawal state machine (state-machines.md)', () => {
     });
   });
 
-  it.each(['SUCCEEDED', 'RETURNED', 'PROCESSING', 'FAILED'] as const)(
-    'FAILED is final: GET %s changes nothing here (a late success is X10)',
+  describe('FAILED, then the provider says it paid after all (W12, Ambiguity #1)', () => {
+    it('GET SUCCEEDED → SUCCEEDED, claw back, flagged LATE_SUCCESS, limit not re-reserved', () => {
+      expect(decideSync(state('FAILED'), found('SUCCEEDED'))).toMatchObject({
+        rule: 'W12',
+        to: 'SUCCEEDED',
+        journals: ['LATE_SUCCESS'],
+        lateSuccess: true,
+        review: 'LATE_SUCCESS',
+        releaseUsage: false,
+        nextCheckSeconds: 300,
+      });
+    });
+
+    it('GET RETURNED → claw back, then the return, together', () => {
+      expect(
+        decideSync(state('FAILED'), found('RETURNED', 'ACCOUNT_CLOSED')),
+      ).toMatchObject({
+        rule: 'W12',
+        to: 'SUCCEEDED',
+        journals: ['LATE_SUCCESS', 'RETURN'],
+        returnReason: 'ACCOUNT_CLOSED',
+        nextCheckSeconds: null,
+      });
+    });
+  });
+
+  it.each(['ACCEPTED', 'PROCESSING', 'FAILED'] as const)(
+    'FAILED is final: GET %s changes nothing',
     (status) => {
       expect(decideSync(state('FAILED'), found(status))).toMatchObject({
         rule: 'FINAL',

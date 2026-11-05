@@ -25,6 +25,7 @@ import {
   WithdrawalApiModule,
   WithdrawalDueWork,
   WithdrawalModule,
+  WithdrawalReviewSource,
   WithdrawalSubmitHandler,
   WithdrawalSyncHandler,
 } from './modules/withdrawal';
@@ -59,7 +60,7 @@ const WORKER_MODULES: (Type | DynamicModule)[] = [
     imports: [WithdrawalModule],
   }),
   SchedulerModule.register({
-    sources: [WithdrawalDueWork],
+    sources: [WithdrawalDueWork, WithdrawalReviewSource],
     imports: [WithdrawalModule],
   }),
 ];

@@ -8,6 +8,7 @@ import { buildPolicies } from './domain/withdrawal-policy';
 import { WithdrawalSubmitHandler } from './handlers/withdrawal-submit.handler';
 import { WithdrawalSyncHandler } from './handlers/withdrawal-sync.handler';
 import { WithdrawalDueWork } from './withdrawal.due-work';
+import { WithdrawalReviewSource } from './withdrawal.review-work';
 import { DailyLimitRepository } from './repositories/daily-limit.repository';
 import { PayoutAttemptsRepository } from './repositories/payout-attempts.repository';
 import { WithdrawalLifecycleRepository } from './repositories/withdrawal-lifecycle.repository';
@@ -30,6 +31,7 @@ import { WITHDRAWAL_POLICIES, WithdrawalService } from './withdrawal.service';
     WithdrawalSubmitHandler,
     WithdrawalSyncHandler,
     WithdrawalDueWork,
+    WithdrawalReviewSource,
     InboundEvents,
     PayoutWebhookService,
     {
@@ -43,6 +45,7 @@ import { WITHDRAWAL_POLICIES, WithdrawalService } from './withdrawal.service';
     WithdrawalSubmitHandler,
     WithdrawalSyncHandler,
     WithdrawalDueWork,
+    WithdrawalReviewSource,
     PayoutWebhookService,
   ],
 })

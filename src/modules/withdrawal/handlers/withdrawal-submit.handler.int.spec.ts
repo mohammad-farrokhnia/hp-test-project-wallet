@@ -125,6 +125,10 @@ describeDb('WithdrawalSubmitHandler (real PostgreSQL)', () => {
       payout,
       cfg,
     );
+  const resubmit = (withdrawalId: string): Envelope => ({
+    ...job(withdrawalId),
+    payload: { withdrawalId, after: 'NOT_FOUND' },
+  });
   const job = (withdrawalId: string): Envelope => ({
     messageId: randomUUID(),
     type: 'job.withdrawal.submit',
@@ -283,7 +287,7 @@ describeDb('WithdrawalSubmitHandler (real PostgreSQL)', () => {
       );
       const seen: number[] = [];
       for (let i = 0; i < 5; i++) {
-        await handler(payout).handle(job(id));
+        await handler(payout).handle(i === 0 ? job(id) : resubmit(id));
         const s = await state(id);
         expect(s.status).toBe('SUBMITTING');
         seen.push(s.check_in);
@@ -408,7 +412,7 @@ describeDb('WithdrawalSubmitHandler (real PostgreSQL)', () => {
     ]);
 
     const payout = new FakePayout((r) => Promise.resolve(accepted(r)));
-    await handler(payout).handle(job(id)); // still inside the lease: nothing
+    await handler(payout).handle(resubmit(id));
     expect(payout.calls).toHaveLength(0);
 
     await ds.query(
@@ -416,6 +420,8 @@ describeDb('WithdrawalSubmitHandler (real PostgreSQL)', () => {
       [id],
     );
     await handler(payout).handle(job(id));
+    expect(payout.calls).toHaveLength(0);
+    await handler(payout).handle(resubmit(id));
     expect(payout.calls.map((c) => c.requestId)).toEqual([id]);
     expect((await attempts(id)).map((a) => [a.attempt_no, a.finished])).toEqual(
       [
@@ -424,6 +430,15 @@ describeDb('WithdrawalSubmitHandler (real PostgreSQL)', () => {
       ],
     );
     expect((await state(id)).status).toBe('PROCESSING');
+  });
+
+  it('a duplicate submit job after an ambiguous answer does nothing: a GET decides first', async () => {
+    const { id } = await pending();
+    const payout = new FakePayout(() => Promise.resolve(ambiguous('timeout')));
+    await handler(payout).handle(job(id));
+    await handler(payout).handle(job(id));
+    expect(payout.calls).toHaveLength(1);
+    expect((await attempts(id)).map((a) => a.attempt_no)).toEqual([1]);
   });
 
   it('refuses a lease that does not outlast the HTTP timeout', () => {

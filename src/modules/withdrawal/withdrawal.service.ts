@@ -148,6 +148,15 @@ export class WithdrawalService {
       userId,
       quote.amount.currency,
     );
+    if (locked.debt.isNegative()) {
+      return {
+        ok: false,
+        rejection: rejection(
+          'INSUFFICIENT_FUNDS',
+          'Outstanding debt must be repaid before withdrawing',
+        ),
+      };
+    }
     if (locked.available.lt(quote.total)) {
       return { ok: false, rejection: rejection('INSUFFICIENT_FUNDS') };
     }
@@ -223,7 +232,7 @@ export class WithdrawalService {
   }
 }
 
-function rejection(code: ErrorCode): StoredResponse {
-  const err = new AppError(code);
+function rejection(code: ErrorCode, message?: string): StoredResponse {
+  const err = new AppError(code, message);
   return { status: err.status, body: err.toBody() };
 }

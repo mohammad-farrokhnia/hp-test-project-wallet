@@ -1,5 +1,5 @@
 import { Money } from '../../../common/money';
-import { creditLines } from './credit';
+import { clawbackLines, creditLines } from './credit';
 
 const irr = (n: bigint) => Money.rial(n);
 const target = (debt: bigint) => ({
@@ -36,5 +36,32 @@ describe('creditLines: incoming money pays DEBT first', () => {
 
   it.each([0n, -1n])('refuses a credit of %s', (n) => {
     expect(() => creditLines(target(0n), irr(n))).toThrow(/must be positive/);
+  });
+});
+
+describe('clawbackLines: take what AVAILABLE has, the rest becomes DEBT', () => {
+  const t = (available: bigint) => ({
+    availableId: 1n,
+    debtId: 2n,
+    available: irr(available),
+  });
+
+  it('enough available: all from AVAILABLE, no debt', () => {
+    expect(amounts(clawbackLines(t(900n), irr(500n)))).toEqual([[1n, -500n]]);
+  });
+
+  it('some available: empty AVAILABLE, the rest to DEBT', () => {
+    expect(amounts(clawbackLines(t(200n), irr(500n)))).toEqual([
+      [1n, -200n],
+      [2n, -300n],
+    ]);
+  });
+
+  it('nothing available: all of it to DEBT', () => {
+    expect(amounts(clawbackLines(t(0n), irr(500n)))).toEqual([[2n, -500n]]);
+  });
+
+  it('refuses a non-positive amount', () => {
+    expect(() => clawbackLines(t(0n), irr(0n))).toThrow(/must be positive/);
   });
 });

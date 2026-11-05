@@ -20,8 +20,7 @@ import {
 export class WithdrawalLifecycleRepository {
   /**
    * @function lockForSubmit
-   * @description Locks the withdrawal for the submit job with `SKIP LOCKED`:
-   * a row another worker holds is skipped, not waited for.
+   * @description Locks the withdrawal for the submit job with `SKIP LOCKED` a row another worker holds is skipped, not waited for.
    * @returns what a submit needs, or `null` when unknown or locked by someone else
    */
   async lockForSubmit(tx: Tx, id: string): Promise<SubmitRow | null> {
@@ -62,7 +61,6 @@ export class WithdrawalLifecycleRepository {
     return r ? (r.status as WithdrawalStatus) : null;
   }
 
-  /** W1: SUBMITTING, attempt counted, `submitted_at` on the first, next check after the lease. */
   async startSubmitting(
     tx: Tx,
     id: string,
@@ -82,7 +80,6 @@ export class WithdrawalLifecycleRepository {
       .execute();
   }
 
-  /** the provider has it. Compare-and-set from SUBMITTING. */
   async markProcessing(
     tx: Tx,
     id: string,
@@ -102,7 +99,6 @@ export class WithdrawalLifecycleRepository {
       .execute();
   }
 
-  /** a replay with other fields. Stays SUBMITTING, money frozen, flagged for a person. */
   async flagReplayMismatch(
     tx: Tx,
     id: string,
@@ -195,6 +191,7 @@ export class WithdrawalLifecycleRepository {
       };
       returnReason?: string | null;
       review?: string;
+      lateSuccess?: boolean;
       nextCheckSeconds: number | null;
     },
   ): Promise<boolean> {
@@ -204,7 +201,12 @@ export class WithdrawalLifecycleRepository {
       .set({
         ...(u.status ? { status: u.status } : {}),
         ...(u.failureReason ? { failure_reason: u.failureReason } : {}),
-        ...(final ? { completed_at: sql<Date>`now()` } : {}),
+        ...(final
+          ? { completed_at: sql<Date>`coalesce(completed_at, now())` }
+          : {}),
+        ...(u.lateSuccess
+          ? { late_success_at: sql<Date>`now()`, failure_reason: null }
+          : {}),
         ...(u.provider
           ? {
               provider_status: u.provider.status,

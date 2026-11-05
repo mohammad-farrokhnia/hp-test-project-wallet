@@ -16,6 +16,7 @@ export type {
   InvariantName,
   ViolationRow,
 } from './domain/invariants';
+export { clawbackLines } from './domain/credit';
 export { LedgerError } from './domain/ledger.error';
 export type { LedgerErrorCode } from './domain/ledger.error';
 
@@ -78,6 +79,7 @@ export interface CreditUserInput {
   readonly description?: string;
 }
 
+/** What `LedgerService.post` booked. */
 export interface PostResult {
   readonly journalId: bigint;
   readonly alreadyBooked: boolean;

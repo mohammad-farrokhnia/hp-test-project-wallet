@@ -370,6 +370,15 @@ describeDb(
             FROZEN: '0',
             usage: '1500000',
           });
+        } else if (j.WITHDRAWAL_LATE_SUCCESS) {
+          expect(status).toBe('SUCCEEDED');
+          expect(j.WITHDRAWAL_LATE_SUCCESS).toBe(1);
+          expect(m).toMatchObject({
+            AVAILABLE: '3500000',
+            FROZEN: '0',
+            DEBT: '0',
+            usage: '0',
+          });
         } else {
           expect(status).toBe('FAILED');
           expect(m).toMatchObject({
@@ -496,18 +505,139 @@ describeDb(
       expect(r.check_in).toBeGreaterThanOrEqual(29);
     });
 
-    it('a final FAILED one is still pulled when a signed webhook asks, but not changed here (W12 is X10)', async () => {
-      const { id } = await withdrawal();
-      await sync(id, found('FAILED'));
-      const payout = await sync(id, found('SUCCEEDED'), { trigger: 'WEBHOOK' });
-      expect(payout.getCalls).toBe(1);
-      expect(await row(id)).toMatchObject({
-        status: 'FAILED',
-        provider_status: 'SUCCEEDED',
+    describe('Ambiguity #1: paid after it was FAILED (W12, ADR-10)', () => {
+      const webhook = { trigger: 'WEBHOOK' };
+      const postings = (id: string, kind: string) =>
+        ds.query<{ account: string; amount: string }[]>(
+          `SELECT p.account_kind AS account, p.amount_minor::text AS amount
+           FROM journals j JOIN postings p ON p.journal_id = j.id
+          WHERE j.ref_id = $1 AND j.kind = $2 ORDER BY p.id`,
+          [id, kind],
+        );
+      const requestWithdrawal = (userId: string, toman: bigint) =>
+        service.request(
+          {
+            userId,
+            amount: Money.toman(toman),
+            destination: IBAN,
+            body: { userId, toman: toman.toString() },
+          },
+          `x10-${randomUUID()}`,
+        );
+
+      it('claws back what is available, the rest becomes DEBT; the journal balances; withdrawals are refused until repaid', async () => {
+        const { id: first, userId } = await withdrawal();
+        await sync(first, found('FAILED', 'INVALID_IBAN'));
+        const second = await requestWithdrawal(userId, 450_000n);
+        expect(second.response.status).toBe(201);
+
+        const payout = await sync(first, found('SUCCEEDED'), webhook);
+        expect(payout.getCalls).toBe(1);
+
+        expect(await postings(first, 'WITHDRAWAL_LATE_SUCCESS')).toEqual([
+          { account: 'PAYOUT_CLEARING', amount: '1500000' },
+          { account: 'AVAILABLE', amount: '-500000' },
+          { account: 'DEBT', amount: '-1000000' },
+        ]);
+        expect(await row(first)).toMatchObject({
+          status: 'SUCCEEDED',
+          failure_reason: null,
+          needs_review: true,
+          review_reason: 'LATE_SUCCESS',
+        });
+        const [{ late }] = await ds.query<{ late: boolean }[]>(
+          'SELECT late_success_at IS NOT NULL AS late FROM withdrawals WHERE id = $1',
+          [first],
+        );
+        expect(late).toBe(true);
+        expect(await money(userId)).toEqual({
+          AVAILABLE: '0',
+          FROZEN: '4500000',
+          DEBT: '-1000000',
+          usage: '4500000',
+        });
+        expect(await violations(userId)).toEqual([]);
+
+        const refused = await requestWithdrawal(userId, 100_000n);
+        expect(refused.response).toEqual({
+          status: 422,
+          body: {
+            code: 'INSUFFICIENT_FUNDS',
+            message: 'Outstanding debt must be repaid before withdrawing',
+          },
+        });
+
+        await runner.run((tx) =>
+          ledger.creditUser(tx, {
+            userId,
+            amount: Money.toman(300_000n),
+            source: 'OPS_ADJUSTMENTS',
+            kind: 'ADJUSTMENT_CREDIT',
+            refId: randomUUID(),
+          }),
+        );
+        expect(await money(userId)).toMatchObject({
+          AVAILABLE: '2000000',
+          DEBT: '0',
+        });
+        expect(
+          (await requestWithdrawal(userId, 150_000n)).response.status,
+        ).toBe(201);
+        expect(await violations(userId)).toEqual([]);
       });
-      expect(await journals(id)).toEqual({
-        WITHDRAWAL_FREEZE: 1,
-        WITHDRAWAL_RELEASE: 1,
+
+      it('with enough available, everything comes from AVAILABLE and no debt is recorded', async () => {
+        const { id, userId } = await withdrawal();
+        await sync(id, found('FAILED'));
+        await sync(id, found('SUCCEEDED'), webhook);
+        expect(await postings(id, 'WITHDRAWAL_LATE_SUCCESS')).toEqual([
+          { account: 'PAYOUT_CLEARING', amount: '1500000' },
+          { account: 'AVAILABLE', amount: '-1500000' },
+        ]);
+        expect(await money(userId)).toMatchObject({
+          AVAILABLE: '3500000',
+          DEBT: '0',
+        });
+      });
+
+      it('a repeated webhook books the claw-back once', async () => {
+        const { id } = await withdrawal();
+        await sync(id, found('FAILED'));
+        for (let i = 0; i < 3; i++) await sync(id, found('SUCCEEDED'), webhook);
+        expect(await journals(id)).toEqual({
+          WITHDRAWAL_FREEZE: 1,
+          WITHDRAWAL_RELEASE: 1,
+          WITHDRAWAL_LATE_SUCCESS: 1,
+        });
+      });
+
+      it('paid after FAILED and then returned: claw back and credit the return together', async () => {
+        const { id, userId } = await withdrawal();
+        await sync(id, found('FAILED'));
+        await sync(id, found('RETURNED', 'ACCOUNT_CLOSED'), webhook);
+        expect(await journals(id)).toEqual({
+          WITHDRAWAL_FREEZE: 1,
+          WITHDRAWAL_RELEASE: 1,
+          WITHDRAWAL_LATE_SUCCESS: 1,
+          WITHDRAWAL_RETURN: 1,
+        });
+        expect(await row(id)).toMatchObject({
+          status: 'SUCCEEDED',
+          returned: true,
+        });
+        expect(await money(userId)).toMatchObject({
+          AVAILABLE: '5000000',
+          DEBT: '0',
+        }); // net: nothing left
+        expect(await violations(userId)).toEqual([]);
+      });
+
+      it('without a signed webhook, a FAILED withdrawal is not pulled at all', async () => {
+        const { id } = await withdrawal();
+        await sync(id, found('FAILED'));
+        const payout = await sync(id, found('SUCCEEDED'));
+        expect(payout.getCalls).toBe(0);
+        expect((await row(id)).status).toBe('FAILED');
       });
     });
 

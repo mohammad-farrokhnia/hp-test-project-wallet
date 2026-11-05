@@ -27,6 +27,8 @@ import {
 import { WithdrawalLifecycleRepository } from '../repositories/withdrawal-lifecycle.repository';
 import { WithdrawalsRepository } from '../repositories/withdrawals.repository';
 
+export const RESUBMIT_AFTER_NOT_FOUND = 'NOT_FOUND';
+
 /** A submit claimed in transaction 1, to be sent and then recorded. */
 interface Claimed {
   readonly attemptNo: number;
@@ -36,8 +38,8 @@ interface Claimed {
 /**
  * @class WithdrawalSubmitHandler
  * @description Consumer of `job.withdrawal.submit`. Never holds a transaction across the HTTP call:
- * 1. transaction 1: lock the withdrawal `SKIP LOCKED` (another worker has it: stop); go on only if PENDING, or SUBMITTING with no attempt in flight;
- * open attempt n with the exact body, move to SUBMITTING, commit;
+ * 1. transaction 1: lock the withdrawal `SKIP LOCKED` (another worker has it: stop);
+ * go on only if PENDING, or SUBMITTING with no attempt in flight open attempt n with the exact body, move to SUBMITTING, commit;
  * 2. `PayoutClient.submit` with the withdrawal id as `requestId`, never regenerated;
  * 3. transaction 2: close the attempt, then, if still SUBMITTING:
  *    - ACCEPTED, or REPLAYED with matching fields → PROCESSING, check in 10 s;
@@ -71,19 +73,28 @@ export class WithdrawalSubmitHandler implements JobHandler {
 
   async handle(envelope: Envelope): Promise<void> {
     const id = envelope.payload.withdrawalId ?? envelope.aggregateId;
-    const claimed = await this.runner.run((tx) => this.claim(tx, id));
+    const afterNotFound = envelope.payload.after === RESUBMIT_AFTER_NOT_FOUND;
+    const claimed = await this.runner.run((tx) =>
+      this.claim(tx, id, afterNotFound),
+    );
     if (!claimed) return;
 
     const outcome = await this.payout.submit(claimed.request);
     await this.runner.run((tx) => this.record(tx, claimed, outcome));
   }
 
-  private async claim(tx: Tx, id: string): Promise<Claimed | null> {
+  /** @returns the attempt to send, or `null` when there is nothing to do */
+  private async claim(
+    tx: Tx,
+    id: string,
+    afterNotFound: boolean,
+  ): Promise<Claimed | null> {
     const w = await this.lifecycle.lockForSubmit(tx, id);
-    if (!w) return null; // unknown, or another worker holds it
+    if (!w) return null;
     const eligible =
       w.status === 'PENDING' ||
       (w.status === 'SUBMITTING' &&
+        afterNotFound &&
         !(await this.attempts.inFlight(tx, id, this.leaseSeconds)));
     if (!eligible) return null;
 

@@ -172,7 +172,7 @@ What gets stored: 2xx responses and state-dependent 422s (`INSUFFICIENT_FUNDS`, 
 **Wiring:** `WithdrawalModule` (service, repositories, policies; every role) and `WithdrawalApiModule` (controller; api role only). `WithdrawalService.openTotals` is bound as operations' `OpenWithdrawalTotals`, so `/internal/invariants` compares FROZEN with real open withdrawals.
 
 **`WithdrawalSubmitHandler`:**
-1. Transaction 1: lock the withdrawal row (`FOR UPDATE SKIP LOCKED`; locked means another worker has it, so ack and stop). Continue only if `PENDING`, or `SUBMITTING` with no in-flight attempt (an unfinished attempt younger than `WITHDRAWAL_SUBMIT_LEASE_SECONDS`, 30 s; older ones belong to a dead process, and resending the same requestId is safe, PAY-02). Move to `SUBMITTING`, open attempt n with the exact request body, set `next_check_at = now + lease`. Commit. Boot fails if the lease does not outlast `HTTP_TIMEOUT_MS`.
+1. Transaction 1: lock the withdrawal row (`FOR UPDATE SKIP LOCKED`; locked means another worker has it, so ack and stop). Continue only if `PENDING`, or `SUBMITTING` with no in-flight attempt (an unfinished attempt younger than `WITHDRAWAL_SUBMIT_LEASE_SECONDS`, 30 s; older ones belong to a dead process) **and** the job is W5's resubmit (payload `after: NOT_FOUND`, queued only after a GET found nothing). A duplicate or stray submit job for a SUBMITTING withdrawal does nothing: we always ask before resubmitting (the crash table), even though the provider would de-duplicate (PAY-02). Move to `SUBMITTING`, open attempt n with the exact request body, set `next_check_at = now + lease`. Commit. Boot fails if the lease does not outlast `HTTP_TIMEOUT_MS`.
 2. `PayoutClient.submit` (10 s timeout).
 3. Transaction 2: close the attempt with its outcome, then by outcome:
    - `ACCEPTED`, or `REPLAYED` with matching fields → `PROCESSING`.
@@ -187,6 +187,10 @@ What gets stored: 2xx responses and state-dependent 422s (`INSUFFICIENT_FUNDS`, 
    - `NOT_FOUND` while `SUBMITTING` with no in-flight attempt → enqueue submit with the same requestId;
    - `NOT_FOUND` after the provider had accepted it → `needs_review`;
    - unavailable → reschedule.
+
+**W12 (Ambiguity #1, ADR-10):** a sync that finds a FAILED withdrawal SUCCEEDED (pulled because a signed webhook asked) books `WITHDRAWAL_LATE_SUCCESS` from the locked balances with `ledger.clawbackLines` (PAYOUT_CLEARING +x, AVAILABLE −min(available, x), DEBT −rest), sets SUCCEEDED, `late_success_at`, clears `failure_reason`, keeps `completed_at`, flags `LATE_SUCCESS` and logs an `ALERT`; the daily limit is not reserved again. RETURNED instead: the claw-back and the return together. While a currency's DEBT is below zero, `POST /withdrawals` in it answers a stored 422 `INSUFFICIENT_FUNDS` ("Outstanding debt must be repaid before withdrawing").
+
+**Crash and chaos (X11):** `withdrawal-chaos.int.spec.ts` drives the real handlers, sweeper source and outbox against `FakePayoutServer` (stateful, de-duplicating, failing per finding) with crashes at the three crash points; it asserts one transfer per requestId, every withdrawal final and agreeing with the provider, one terminal journal each, nothing left frozen.
 
 **`PayoutWebhookController`:**
 1. Verify `x-signature` = hex HMAC-SHA256(raw body, secret) in constant time. Invalid → `inbound_events` (`REJECTED_SIGNATURE`) and 401.
@@ -249,7 +253,7 @@ Next, `PspClient.createPayment(amountRial, orderId = depositId, callbackUrl)`. T
 | Source | Claims (`UPDATE … WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED LIMIT 100) RETURNING`) | Publishes |
 |---|---|---|
 | Withdrawal due | `next_check_at <= now()`; bumps it 30 s ahead first | `job.withdrawal.submit` if PENDING, else `job.withdrawal.sync` |
-| Withdrawal review | non-final and older than 30 min, not yet flagged | sets `needs_review = STUCK`, logs an alert |
+| Withdrawal review (`WithdrawalReviewSource`) | non-final, older than `REVIEW_AFTER_MINUTES` (30), not yet flagged; partial index `withdrawals_unflagged_open_idx` | sets `needs_review = STUCK`, logs an `ALERT`; queues nothing, moves no money, leaves `next_check_at` so it is still checked (W14) |
 | Deposit due | `next_check_at <= now()` | `job.deposit.sync` |
 | Deposit expiry | PENDING, `expires_at <= now()` | sync first; the handler fails it as `EXPIRED` only if the PSP still says INIT |
 | Deposit abandoned create | CREATED older than 10 min | `FAILED (CREATE_ABANDONED)`, key completed with that response |
