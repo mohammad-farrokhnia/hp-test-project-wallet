@@ -9,6 +9,11 @@ describe('loadConfig', () => {
     expect(c.limits.withdrawMinRial).toBe(1_000_000n);
     expect(c.limits.withdrawDailyLimitRial).toBe(2_000_000_000n);
     expect(c.internalApiKey).toBeNull();
+    expect(c.outbox).toEqual({
+      batchSize: 100,
+      intervalMs: 500,
+      claimSeconds: 30,
+    });
     expect(c.idempotency).toEqual({
       retentionDays: 7,
       cleanupIntervalMinutes: 60,

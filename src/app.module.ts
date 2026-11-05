@@ -12,7 +12,11 @@ import {
   IdempotencyModule,
 } from './modules/idempotency';
 import { LedgerModule } from './modules/ledger';
-import { MessagingModule, RabbitModule } from './modules/messaging';
+import {
+  MessagingModule,
+  OutboxRelayModule,
+  RabbitModule,
+} from './modules/messaging';
 import { OperationsModule } from './modules/operations';
 import { WalletModule } from './modules/wallet';
 
@@ -36,7 +40,11 @@ const API_MODULES: Type[] = [
   WalletModule,
 ];
 
-const WORKER_MODULES: Type[] = [IdempotencyCleanupModule, RabbitModule];
+const WORKER_MODULES: Type[] = [
+  IdempotencyCleanupModule,
+  RabbitModule,
+  OutboxRelayModule,
+];
 
 /**
  * @class AppModule

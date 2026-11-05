@@ -27,6 +27,11 @@ export class AppConfig {
     usdtWithdrawFeeMicro: bigint;
   };
   readonly timing: { depositExpiryMinutes: number; reviewAfterMinutes: number };
+  readonly outbox: {
+    batchSize: number;
+    intervalMs: number;
+    claimSeconds: number;
+  };
   readonly idempotency: {
     retentionDays: number;
     cleanupIntervalMinutes: number;
@@ -77,6 +82,11 @@ export class AppConfig {
     this.timing = {
       depositExpiryMinutes: e.DEPOSIT_EXPIRY_MINUTES,
       reviewAfterMinutes: e.REVIEW_AFTER_MINUTES,
+    };
+    this.outbox = {
+      batchSize: e.OUTBOX_RELAY_BATCH_SIZE,
+      intervalMs: e.OUTBOX_RELAY_INTERVAL_MS,
+      claimSeconds: e.OUTBOX_CLAIM_SECONDS,
     };
     this.idempotency = {
       retentionDays: e.IDEMPOTENCY_RETENTION_DAYS,

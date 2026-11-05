@@ -80,6 +80,39 @@ describe('RabbitPublisher', () => {
     },
   );
 
+  it('caps the wait for a channel too, and never publishes on a channel that arrives late', async () => {
+    let publishes = 0;
+    const late: ConfirmChannelSource = {
+      confirmChannel: () =>
+        new Promise((resolve) =>
+          setTimeout(() => {
+            const ch = new EventEmitter() as EventEmitter & {
+              publish: ConfirmChannel['publish'];
+            };
+            ch.publish = () => {
+              publishes++;
+              return true;
+            };
+            resolve(ch as unknown as ConfirmChannel);
+          }, 80),
+        ),
+    };
+    await expect(publisher(late, 0).publish(message)).rejects.toMatchObject({
+      reason: 'NOT_CONFIRMED',
+    });
+    await new Promise((r) => setTimeout(r, 120)); // the channel has arrived by now
+    expect(publishes).toBe(0);
+  });
+
+  it('reports its worst-case duration: every attempt capped, plus the backoff', () => {
+    const p = new RabbitPublisher(scriptedChannels(['ack']).source, {
+      timeoutMs: 5000,
+      retries: 3,
+      backoffMs: 200,
+    });
+    expect(p.maxPublishMs()).toBe(4 * 5000 + 200 * (1 + 2 + 3));
+  });
+
   it('gives up with NOT_CONFIRMED after retries + 1 attempts', async () => {
     const { source, published } = scriptedChannels(['nack']);
     await expect(publisher(source, 2).publish(message)).rejects.toMatchObject({

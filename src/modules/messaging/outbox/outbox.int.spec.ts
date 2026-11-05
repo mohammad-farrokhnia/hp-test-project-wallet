@@ -4,12 +4,13 @@ import { Money } from '../../../common/money';
 import { connectTestDb, describeDb } from '../../../database/int-testing';
 import { Tx, TransactionRunner } from '../../../database/transaction-runner';
 import { newLedgerService } from '../../ledger/testing';
+import { OutboxRepository } from './outbox.repository';
 import { OutboxMessage, OutboxService } from './outbox.service';
 
 describeDb('OutboxService (real PostgreSQL)', () => {
   let ds: DataSource;
   let runner: TransactionRunner;
-  const outbox = new OutboxService();
+  const outbox = new OutboxService(new OutboxRepository());
   const ledger = newLedgerService();
 
   beforeAll(async () => {
@@ -54,23 +55,29 @@ describeDb('OutboxService (real PostgreSQL)', () => {
 
   it('a committed business transaction leaves exactly one unsent outbox row', async () => {
     const id = randomUUID();
-    const outboxId = await runner.run(async (tx) => {
+    const written = await runner.run(async (tx) => {
       await businessChange(tx, id);
-      return outbox.add(tx, job(id));
+      const outboxId = await outbox.add(tx, job(id));
+      const rows = await tx.query<Record<string, unknown>[]>(
+        'SELECT * FROM outbox WHERE aggregate_id = $1',
+        [id],
+      );
+      return { outboxId, rows };
     });
 
-    const rows = await rowsFor(id);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
-      id: outboxId.toString(),
-      exchange: 'wallet.jobs',
-      routing_key: 'job.withdrawal.submit',
-      aggregate_type: 'WITHDRAWAL',
-      payload: { withdrawalId: id },
-      published_at: null,
-      claimed_until: null,
-      attempts: 0,
-    });
+    expect(written.rows).toEqual([
+      expect.objectContaining({
+        id: written.outboxId.toString(),
+        exchange: 'wallet.jobs',
+        routing_key: 'job.withdrawal.submit',
+        aggregate_type: 'WITHDRAWAL',
+        payload: { withdrawalId: id },
+        published_at: null,
+        claimed_until: null,
+        attempts: 0,
+      }),
+    ]);
+    expect(await rowsFor(id)).toHaveLength(1);
     expect(await journalsFor(id)).toBe('1');
   });
 

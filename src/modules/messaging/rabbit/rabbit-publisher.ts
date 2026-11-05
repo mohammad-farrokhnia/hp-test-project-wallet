@@ -41,6 +41,18 @@ export class RabbitPublisher {
   ) {}
 
   /**
+   * @function maxPublishMs
+   * @description The longest `publish` can take: every attempt is capped at `timeoutMs`,
+   *  plus the backoff between attempts. The relay relies on this bound to never publish past its claim.
+   */
+  maxPublishMs(): number {
+    const { timeoutMs, retries, backoffMs } = this.options;
+    return (
+      (retries + 1) * timeoutMs + (backoffMs * retries * (retries + 1)) / 2
+    );
+  }
+
+  /**
    * @function publish
    * @throws {PublishError} `UNROUTABLE` at once; `NOT_CONFIRMED` after `retries + 1` attempts
    */
@@ -48,8 +60,7 @@ export class RabbitPublisher {
     const attempts = this.options.retries + 1;
     for (let attempt = 1; ; attempt++) {
       try {
-        const ch = await this.channels.confirmChannel();
-        await this.publishOnce(ch, message);
+        await this.attempt(message);
         return;
       } catch (err) {
         if (err instanceof PublishError) throw err;
@@ -69,55 +80,69 @@ export class RabbitPublisher {
     }
   }
 
-  /** One attempt: resolves on ack, rejects on nack, return, timeout or channel loss. */
-  private publishOnce(ch: ConfirmChannel, m: OutgoingMessage): Promise<void> {
+  /**
+   * One attempt, capped at `timeoutMs` from the start, waiting for a channel included: resolves on ack; rejects on nack, return, timeout or channel loss. A channel that arrives after the cap is not used, so a timed-out attempt can never publish late.
+   */
+  private attempt(m: OutgoingMessage): Promise<void> {
     return new Promise((resolve, reject) => {
+      let ch: ConfirmChannel | undefined;
       let returned = false;
       let settled = false;
       const onReturn = (msg: Message) => {
         if (msg.properties.messageId === m.messageId) returned = true;
       };
-      const finish = (err?: Error) => {
+      const finish = (err?: unknown) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        ch.off('return', onReturn);
-        if (err) reject(err);
-        else resolve();
+        ch?.off('return', onReturn);
+        if (err === undefined) resolve();
+        else {
+          reject(
+            err instanceof Error
+              ? err
+              : new Error('publish failed', { cause: err }),
+          );
+        }
       };
       const timer = setTimeout(
         () =>
           finish(new Error(`no confirm within ${this.options.timeoutMs} ms`)),
         this.options.timeoutMs,
       );
-      ch.on('return', onReturn);
-      try {
-        ch.publish(
-          m.exchange,
-          m.routingKey,
-          Buffer.from(JSON.stringify(m.body)),
-          {
-            persistent: true,
-            mandatory: true,
-            contentType: 'application/json',
-            messageId: m.messageId,
-            timestamp: Math.floor(Date.now() / 1000),
-          },
-          (err: unknown) => {
-            if (err) finish(err instanceof Error ? err : new Error('nacked'));
-            else if (returned) {
-              finish(
-                new PublishError(
-                  'UNROUTABLE',
-                  `${m.messageId}: no queue bound for ${m.exchange} / ${m.routingKey}`,
-                ),
-              );
-            } else finish();
-          },
-        );
-      } catch (err) {
-        finish(err instanceof Error ? err : new Error(String(err)));
-      }
+
+      this.channels.confirmChannel().then((channel) => {
+        if (settled) return;
+        ch = channel;
+        channel.on('return', onReturn);
+        try {
+          channel.publish(
+            m.exchange,
+            m.routingKey,
+            Buffer.from(JSON.stringify(m.body)),
+            {
+              persistent: true,
+              mandatory: true,
+              contentType: 'application/json',
+              messageId: m.messageId,
+              timestamp: Math.floor(Date.now() / 1000),
+            },
+            (err: unknown) => {
+              if (err) finish(err instanceof Error ? err : new Error('nacked'));
+              else if (returned) {
+                finish(
+                  new PublishError(
+                    'UNROUTABLE',
+                    `${m.messageId}: no queue bound for ${m.exchange} / ${m.routingKey}`,
+                  ),
+                );
+              } else finish();
+            },
+          );
+        } catch (err) {
+          finish(err);
+        }
+      }, finish);
     });
   }
 }

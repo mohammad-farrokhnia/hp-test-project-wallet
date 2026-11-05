@@ -52,6 +52,15 @@ export const envSchema = z.object({
   DEPOSIT_EXPIRY_MINUTES: int(1440),
   REVIEW_AFTER_MINUTES: int(30),
 
+  OUTBOX_RELAY_BATCH_SIZE: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(1000)
+    .default(100),
+  OUTBOX_RELAY_INTERVAL_MS: int(500),
+  OUTBOX_CLAIM_SECONDS: int(30),
+
   IDEMPOTENCY_RETENTION_DAYS: int(7),
   IDEMPOTENCY_CLEANUP_INTERVAL_MINUTES: int(60),
 });

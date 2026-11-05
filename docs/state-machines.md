@@ -105,9 +105,10 @@ CREATED  ->  PENDING  ->  SUCCEEDED
 | From      | Event                             | To                                                                 |
 | --------- | --------------------------------- | ------------------------------------------------------------------ |
 | —         | Written in a business transaction | unsent (`published_at` null)                                       |
-| unsent    | Relay claims it                   | claimed (`claimed_until = now + 30 s`)                             |
+| unsent    | Relay claims it                   | claimed (`claimed_until = now + 30 s`, `attempts + 1`)             |
 | claimed   | Broker confirmed                  | published (`published_at` set)                                     |
-| claimed   | Publish failed or relay died      | unsent again when the claim expires (`attempts + 1`, `last_error`) |
+| claimed   | Publish failed                    | claimed for a backoff (`30 s × 2^(attempts − 1)`, ≤ 10 min), `last_error` set; unsent again after it |
+| claimed   | Relay died, or left it for later  | unsent again when the claim expires                                |
 | published | Older than 3 days                 | deleted                                                            |
 
 ## Crash at any point: what the restart finds

@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { db } from '../../../database/kysely';
 import { Tx } from '../../../database/transaction-runner';
 import { OutboxExchange } from '../topology';
+import { OutboxRepository } from './outbox.repository';
 
 /** A message to publish once the caller's transaction commits. */
 export interface OutboxMessage {
@@ -17,24 +17,21 @@ export interface OutboxMessage {
  */
 @Injectable()
 export class OutboxService {
+  constructor(private readonly outbox: OutboxRepository) {}
+
   /**
    * @function add
    * @param tx - the caller's business transaction
    * @param message - where to send it, what it is about, its ids
    * @returns the outbox id, which is also the message id
    */
-  async add(tx: Tx, message: OutboxMessage): Promise<bigint> {
-    const row = await db(tx)
-      .insertInto('outbox')
-      .values({
-        exchange: message.exchange,
-        routing_key: message.routingKey,
-        aggregate_type: message.aggregate.type,
-        aggregate_id: message.aggregate.id,
-        payload: JSON.stringify(message.payload),
-      })
-      .returning('id')
-      .executeTakeFirstOrThrow();
-    return BigInt(row.id);
+  add(tx: Tx, message: OutboxMessage): Promise<bigint> {
+    return this.outbox.insert(tx, {
+      exchange: message.exchange,
+      routingKey: message.routingKey,
+      aggregateType: message.aggregate.type,
+      aggregateId: message.aggregate.id,
+      payload: message.payload,
+    });
   }
 }

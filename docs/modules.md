@@ -102,7 +102,7 @@ What gets stored: 2xx responses and state-dependent 422s (`INSUFFICIENT_FUNDS`, 
 | Unit | Responsibility |
 |---|---|
 | `OutboxService.add(tx, {exchange, routingKey, aggregate, payload})` | Writes a message in the caller's transaction (exported, every role); returns the outbox id, which is the message id. Payload is ids only (string values) |
-| `OutboxRelay` (worker) | Every 200 ms–1 s: claim up to 100 unsent rows (`FOR UPDATE SKIP LOCKED`, set `claimed_until`), publish with confirms, mark `published_at`. Claim expiry after 30 s makes a crashed relay's rows claimable again |
+| `OutboxRelay` (worker) | One round: claim up to `OUTBOX_RELAY_BATCH_SIZE` (100) unsent rows in a short transaction (`FOR UPDATE SKIP LOCKED`, `claimed_until = now + OUTBOX_CLAIM_SECONDS` (30), `attempts + 1`), publish each with confirms **outside** any transaction, then mark `published_at` (and record failures) in a second short transaction. Runs again at once after a full batch, else after `OUTBOX_RELAY_INTERVAL_MS` (500). **Never twice:** a publish only starts if, at its worst case (`RabbitPublisher.maxPublishMs`), it ends before the claim does; the rest stay claimed for later, and boot fails if the claim is too short for that. **Never lost:** a relay that dies before marking leaves its rows claimed; after expiry another relay republishes them (consumers drop the duplicate by message id). A failed publish keeps `last_error` and backs off (`claim × 2^(attempts−1)`, at most 10 min) |
 | `RabbitTopology` (`topology.ts`) | The layout below as data; `declareTopology` runs on every (re)connect. Same arguments are a no-op; changed arguments fail with PRECONDITION_FAILED instead of silently keeping the old queue |
 | `RabbitConnection` (worker) | One amqplib recovering connection: boot never waits for the broker, reconnects with backoff (200 ms to 30 s), redeclares the topology after each connect, reopens the confirm channel after it closes. Host and port from `RABBITMQ_HOST`/`RABBITMQ_PORT` |
 | `RabbitPublisher` (worker) | Publisher confirms: resolves only on the broker's ack. Persistent, `mandatory`, `messageId`. A nack, no confirm within `RABBITMQ_PUBLISH_TIMEOUT_MS` (5 s) or a lost channel is retried `RABBITMQ_PUBLISH_RETRIES` (3) times with the same message id; an unroutable message fails at once (`UNROUTABLE`) |
@@ -119,7 +119,7 @@ What gets stored: 2xx responses and state-dependent 422s (`INSUFFICIENT_FUNDS`, 
 | `wallet.dlx` | fanout | → `job.dead` | none (alert + manual) |
 | `wallet.events` (bonus) | topic | `wallet.balance.changed`, `deposit.status.changed`, `withdrawal.status.changed` → `notify.events` | `NotificationConsumer` (inbox de-dup) |
 
-**Envelope:** `{messageId, type, aggregateId, occurredAt}`. Ids only: handlers always reload state from the database, so a stale or duplicated message can't move money.
+**Envelope:** `{messageId, type, aggregateType, aggregateId, occurredAt, payload}`; `messageId` is the outbox id, `type` the routing key, `payload` the row's ids. Ids only: handlers always reload state from the database, so a stale or duplicated message can't move money.
 
 ## Business modules
 
