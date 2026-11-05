@@ -234,7 +234,8 @@ One row per account change. Immutable.
 - `CHECK ((failure_reason IS NOT NULL) = (status = 'FAILED'))`
 - `CHECK ((completed_at IS NOT NULL) = (status IN ('SUCCEEDED', 'FAILED')))`
 - `CHECK (returned_at IS NULL OR status = 'SUCCEEDED')`
-- `CHECK (destination_type = CASE currency WHEN 'IRR' THEN 'IBAN' ELSE 'TRC20' END)`
+- `CHECK (destination_type = CASE currency WHEN 'IRR' THEN 'IBAN' ELSE 'TRC20' END)`, and a format CHECK on `destination` (`IR` + 24 digits, or `T` + 33 base58 characters) behind the app's mod-97 and base58check validation
+- `return_reason` only with `returned_at`; `late_success_at` only when `SUCCEEDED`; `needs_review` needs a `review_reason`; `limit_rate_rial_per_usdt` only on USDT; CHECKs on every status and reason list
 - `INDEX (next_check_at) WHERE next_check_at IS NOT NULL`: the sweeper's queue, which includes successful withdrawals still watched for returns.
 - `INDEX (user_id, created_at DESC)`
 - `INDEX (created_at) WHERE needs_review`: the review queue.

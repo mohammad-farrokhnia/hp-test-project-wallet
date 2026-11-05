@@ -92,6 +92,18 @@ export interface Outbox {
   routing_key: string;
 }
 
+export interface PayoutAttempts {
+  attempt_no: number;
+  error: string | null;
+  finished_at: Timestamp | null;
+  http_status: number | null;
+  outcome: string | null;
+  request_body: Json;
+  response_body: Json | null;
+  started_at: Generated<Timestamp>;
+  withdrawal_id: string;
+}
+
 export interface Postings {
   account_id: Int8;
   account_kind: string;
@@ -104,11 +116,51 @@ export interface Postings {
   user_id: string | null;
 }
 
+export interface WithdrawalDailyUsage {
+  cap_rial: Int8;
+  day: string;
+  updated_at: Generated<Timestamp>;
+  used_rial: Generated<Int8>;
+  user_id: string;
+}
+
+export interface Withdrawals {
+  amount_minor: Int8;
+  completed_at: Timestamp | null;
+  created_at: Generated<Timestamp>;
+  currency: string;
+  destination: string;
+  destination_type: string;
+  failure_reason: string | null;
+  fee_minor: Generated<Int8>;
+  id: string;
+  late_success_at: Timestamp | null;
+  limit_amount_rial: Int8;
+  limit_day: string;
+  limit_rate_rial_per_usdt: Int8 | null;
+  needs_review: Generated<boolean>;
+  next_check_at: Timestamp | null;
+  provider_reason: string | null;
+  provider_status: string | null;
+  provider_tracking_id: string | null;
+  return_reason: string | null;
+  returned_at: Timestamp | null;
+  review_reason: string | null;
+  status: string;
+  submit_attempts: Generated<number>;
+  submitted_at: Timestamp | null;
+  updated_at: Generated<Timestamp>;
+  user_id: string;
+}
+
 export interface DB {
   accounts: Accounts;
   adjustments: Adjustments;
   idempotency_keys: IdempotencyKeys;
   journals: Journals;
   outbox: Outbox;
+  payout_attempts: PayoutAttempts;
   postings: Postings;
+  withdrawal_daily_usage: WithdrawalDailyUsage;
+  withdrawals: Withdrawals;
 }

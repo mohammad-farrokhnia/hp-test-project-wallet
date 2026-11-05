@@ -58,7 +58,7 @@ Nothing points back: the ledger knows nothing about withdrawals, and the schedul
 | `common/errors` | Error catalog, `AppError`, global exception filter, constraint-error mapper | Every error leaves as `{code, message}` |
 | `common/validation` | DTO validation pipe; destination validators | `normalizeIban`, `isValidIban` (mod-97), `isValidTrc20` (base58check, prefix 0x41) |
 | `common/guards` | `InternalApiKeyGuard` via `@InternalOnly()`: active only when `INTERNAL_API_KEY` is set; then `X-Internal-Api-Key` must match (sha256 + constant-time compare), else 401 `UNAUTHORIZED`. Runs before the Idempotency-Key check. Warns at boot (api role) when off. A test fails if any `/internal` or `/reconciliation` controller lacks it | `/internal/*`, `/reconciliation/run` |
-| `common/time` | Business clock from the database | `tehranDay(tx)` → date |
+| `common/time` | Business clock from the database | `tehranDay(tx, at?)` → `'YYYY-MM-DD'` from the database `now()` (or `at`, for tests); DATE columns are read as text everywhere (`data-source.ts`) so a day never shifts by a timezone |
 | `database` | DataSource, migration runner, transaction runner | `TransactionRunner.run(fn, {retries})` |
 | `health` | Liveness and readiness | `/health`, `/ready` (database + RabbitMQ) |
 
@@ -149,10 +149,10 @@ What gets stored: 2xx responses and state-dependent 422s (`INSUFFICIENT_FUNDS`, 
 | `WithdrawalController` | `POST /withdrawals`, `GET /withdrawals/:id`, `POST /withdrawals/:id/cancel` (bonus) |
 | `PayoutWebhookController` | `POST /webhooks/payout`: raw-body HMAC, record, schedule sync, 200 |
 | `WithdrawalService` | `request`, `get`, `cancel`, `openTotals()` (Σ amount + fee of non-final withdrawals per user and currency) |
-| `WithdrawalPolicy` (domain) | Minimum, fee and limit amount per currency; destination type per currency |
+| `WithdrawalPolicy` (domain) | `buildPolicies(config.limits)`: per currency the minimum, fee, destination type and the rial counted toward the daily limit. IRR: 100,000 toman, no fee, IBAN, counted in full. USDT: 10 USDT, 1 USDT fee, TRC20, **counted as 0 until B2** prices it. `quoteWithdrawal(policy, amount)` → `{amount, fee, total = amount + fee, limitAmountRial}` or `BELOW_MINIMUM` |
 | `WithdrawalStateMachine` (domain) | The transition table in `state-machines.md`; `next(status, event)` |
 | `WithdrawalOutcomeService` | Applies a provider snapshot: journals, status, flags, `next_check_at`, transition row, events |
-| `DailyLimitRepository` | `reserve`, `release` on `withdrawal_daily_usage` |
+| `DailyLimitRepository` | `reserve(tx, {userId, day, amountRial, capRial})` → bool: creates the day's row with today's cap, then one `UPDATE … SET used = used + x WHERE used + x <= cap`, so concurrent requests can't both pass. `release` gives an amount back to its day (never below zero). Locked last (ADR-1) |
 | `WithdrawalSubmitHandler` | Consumer of `job.withdrawal.submit` |
 | `WithdrawalSyncHandler` | Consumer of `job.withdrawal.sync` |
 | `WithdrawalDueWork` | Implements the scheduler's `DueWorkSource` |

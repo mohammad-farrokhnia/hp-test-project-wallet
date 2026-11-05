@@ -35,6 +35,7 @@ run(
     '--dialect=postgres',
     '--url=env(CODEGEN_DATABASE_URL)',
     '--exclude-pattern=public.migrations',
+    '--date-parser=string', // matches the driver: DATE is 'YYYY-MM-DD' text
     '--out-file=src/database/db.types.ts',
   ],
   { CODEGEN_DATABASE_URL: url },
