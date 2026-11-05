@@ -228,15 +228,17 @@ Next, `PspClient.createPayment(amountRial, orderId = depositId, callbackUrl)`. T
 1. Record in `inbound_events`.
 2. Load the deposit by the path id. The body's `orderId` must equal it, and its `token` must equal ours once known; otherwise `MISMATCH`.
 3. Non-final deposit → `next_check_at = now()` plus outbox `job.deposit.sync`.
-4. Always answer 200. The callback's `status` and `amount` are ignored (PSP-06/07).
+4. Always answer 200. The callback's `status` and `amount` are ignored (PSP-06/07). The one exception is a body that claims to be JSON and is not: the body parser answers 400 before the controller runs, and nothing is recorded. The simulator never sends one.
 
 **`DepositSyncHandler`:**
 1. `PspClient.getPayment(token)`.
 2. By the PSP status:
-   - `INIT` → reschedule; once `expires_at` has passed → `FAILED (EXPIRED)`.
+   - `INIT` → reschedule on the poll schedule; once `expires_at` has passed → `FAILED (EXPIRED)` (the expiry is D6).
    - `PAID` or `VERIFIED` → `verify`. On `OK` (100) or `ALREADY_VERIFIED` (101), in one transaction: lock the deposit (compare-and-set PENDING → SUCCEEDED), `ledger.creditUser(DEPOSIT_CREDIT, verified amount)`, set `psp_ref_id` and `credited_rial`, transition row; `needs_review = AMOUNT_DIFFERS` if the verified amount ≠ requested. `UNAVAILABLE` (503) → retry in 5 s. `NOT_PAID` (−51) → re-read the status next round.
    - `FAILED` → `FAILED (PSP_FAILED)`.
    - `REVERSED` → `FAILED (PSP_REVERSED)`.
+
+   The lookup and `verify` run outside any transaction; the decision is made on the row as locked. A bank reference that already credited another deposit violates `UNIQUE (psp_ref_id)`: the job fails, is retried, and dead-letters, so money is never booked twice. A deposit that is not `PENDING` costs no PSP call.
 
 ### transfer (bonus)
 **Owns:** `transfers`. **Depends on:** ledger, idempotency.

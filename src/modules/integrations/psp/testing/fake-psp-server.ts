@@ -76,7 +76,7 @@ export class FakePspServer {
     const p = this.payments.get(token);
     if (!p) throw new Error(`no such payment ${token}`);
     p.status = 'PAID';
-    p.refId = `REF${token.slice(-6)}`;
+    p.refId = `REF${randomBytes(8).toString('hex')}`;
   }
 
   private route(req: IncomingMessage, res: ServerResponse): void {

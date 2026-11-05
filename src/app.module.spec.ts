@@ -32,6 +32,7 @@ const API_CONTROLLERS = [
   'HealthController',
   'InvariantsController',
   'PayoutWebhookController',
+  'PspCallbackController',
   'WalletController',
   'WithdrawalController',
 ];

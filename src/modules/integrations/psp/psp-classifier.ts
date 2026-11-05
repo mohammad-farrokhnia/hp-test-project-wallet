@@ -108,7 +108,7 @@ export function classifyLookup(answer: HttpAnswer): PaymentLookup {
 /**
  * @function classifyVerify
  * @description `POST /psp/verify`, decided by the body's `code`, because `-51` comes with HTTP 200:
- * - 100 → `OK`, 101 → `ALREADY_VERIFIED` (both carry the verified amount and `refId`; one without them is `UNAVAILABLE`);
+ * - 100 → `OK`, 101 → `ALREADY_VERIFIED` (both carry a positive verified amount and a `refId`; one without them is `UNAVAILABLE`);
  * - -51 → `NOT_PAID`, which is also what a payment still in INIT answers, so it never decides a failure;
  * - -9 or HTTP 404 → `NOT_FOUND`;
  * - -1, HTTP 503, any other code or status → `UNAVAILABLE`: a 503 was not applied, so retrying is safe.
@@ -128,7 +128,12 @@ export function classifyVerify(answer: HttpAnswer): VerifyOutcome {
     const b = fields(answer.body);
     const amount = readAmount(b?.amount);
     const refId = b?.refId;
-    if (!amount || typeof refId !== 'string' || refId === '') {
+    if (
+      !amount ||
+      !amount.isPositive() ||
+      typeof refId !== 'string' ||
+      refId === ''
+    ) {
       return { kind: 'UNAVAILABLE', reason: 'unreadable verify body' };
     }
     return {

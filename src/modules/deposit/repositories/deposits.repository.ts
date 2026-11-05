@@ -13,6 +13,20 @@ export type DepositFailureReason =
   | 'EXPIRED'
   | 'CREATE_ABANDONED';
 
+export type DepositReviewReason =
+  | 'AMOUNT_DIFFERS'
+  | 'UNVERIFIED_TOO_LONG'
+  | 'LATE_PAYMENT_AFTER_EXPIRY'
+  | 'UNKNOWN_TOKEN';
+
+/** What a callback is matched against. */
+export interface CallbackTarget {
+  readonly id: string;
+  readonly status: DepositStatus;
+  readonly pspToken: string | null;
+  readonly failureReason: DepositFailureReason | null;
+}
+
 export interface NewDeposit {
   readonly id: string;
   readonly userId: string;
@@ -100,6 +114,59 @@ export class DepositsRepository {
       createdAt: r.created_at,
       updatedAt: r.updated_at,
     };
+  }
+
+  /**
+   * @function findCallbackTarget
+   * @returns the deposit a callback names, or `null`
+   */
+  async findCallbackTarget(tx: Tx, id: string): Promise<CallbackTarget | null> {
+    const r = await db(tx)
+      .selectFrom('deposits')
+      .select(['id', 'status', 'psp_token', 'failure_reason'])
+      .where('id', '=', id)
+      .executeTakeFirst();
+    return r
+      ? {
+          id: r.id,
+          status: r.status as DepositStatus,
+          pspToken: r.psp_token,
+          failureReason: r.failure_reason as DepositFailureReason | null,
+        }
+      : null;
+  }
+
+  /**
+   * @function scheduleCheckNow
+   * @description Makes a `PENDING` deposit due for a sync right away.
+   * @returns false when the deposit is no longer `PENDING`
+   */
+  async scheduleCheckNow(tx: Tx, id: string): Promise<boolean> {
+    const res = await db(tx)
+      .updateTable('deposits')
+      .set({ next_check_at: sql<Date>`now()` })
+      .where('id', '=', id)
+      .where('status', '=', 'PENDING')
+      .executeTakeFirst();
+    return res.numUpdatedRows === 1n;
+  }
+
+  /**
+   * @function flagLatePayment
+   * @description Marks a deposit that expired, and then got a callback saying it was paid, for support. It is never verified, so the gateway returns the money to the payer.
+   */
+  async flagLatePayment(tx: Tx, id: string): Promise<void> {
+    await db(tx)
+      .updateTable('deposits')
+      .set({
+        needs_review: true,
+        review_reason:
+          'LATE_PAYMENT_AFTER_EXPIRY' satisfies DepositReviewReason,
+      })
+      .where('id', '=', id)
+      .where('status', '=', 'FAILED')
+      .where('failure_reason', '=', 'EXPIRED')
+      .execute();
   }
 
   /**

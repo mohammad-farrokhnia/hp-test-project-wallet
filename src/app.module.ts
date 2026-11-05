@@ -11,7 +11,11 @@ import {
   IdempotencyCleanupModule,
   IdempotencyModule,
 } from './modules/idempotency';
-import { DepositApiModule } from './modules/deposit';
+import {
+  DepositApiModule,
+  DepositModule,
+  DepositSyncHandler,
+} from './modules/deposit';
 import { LedgerModule } from './modules/ledger';
 import {
   JobsModule,
@@ -58,8 +62,12 @@ const WORKER_MODULES: (Type | DynamicModule)[] = [
   RabbitModule,
   OutboxRelayModule,
   JobsModule.register({
-    handlers: [WithdrawalSubmitHandler, WithdrawalSyncHandler],
-    imports: [WithdrawalModule],
+    handlers: [
+      WithdrawalSubmitHandler,
+      WithdrawalSyncHandler,
+      DepositSyncHandler,
+    ],
+    imports: [WithdrawalModule, DepositModule],
   }),
   SchedulerModule.register({
     sources: [WithdrawalDueWork, WithdrawalReviewSource],
