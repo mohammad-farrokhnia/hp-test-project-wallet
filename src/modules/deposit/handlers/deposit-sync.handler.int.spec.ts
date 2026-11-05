@@ -460,4 +460,84 @@ describeDb('DepositSyncHandler: the state machine on real PostgreSQL', () => {
       expect(await row(id)).toMatchObject({ status: 'CREATED' });
     });
   });
+
+  describe('expiry after 24 hours (ADR-11, D7)', () => {
+    const expire = (d: Pending) =>
+      ds.query(
+        `UPDATE deposits
+            SET created_at = now() - interval '2 days',
+                expires_at = now() - interval '1 minute'
+          WHERE id = $1`,
+        [d.id],
+      );
+
+    it('a deposit the PSP still shows as INIT after expires_at becomes FAILED (EXPIRED), final, nothing credited', async () => {
+      const d = await pending();
+      await expire(d);
+
+      await sync(d.id);
+
+      expect(await row(d.id)).toMatchObject({
+        status: 'FAILED',
+        failure_reason: 'EXPIRED',
+        psp_status: 'INIT',
+        credited_rial: null,
+        completed: true,
+        next_in: null,
+      });
+      expect(await journalLines(d.id)).toEqual([]);
+      expect(spy.verifies).toBe(0);
+    });
+
+    it('before expires_at the same INIT deposit stays PENDING', async () => {
+      const d = await pending();
+      await sync(d.id);
+      expect(await row(d.id)).toMatchObject({ status: 'PENDING' });
+    });
+
+    it('a payment that is PAID by then is still verified and credited: only INIT expires', async () => {
+      const d = await pending();
+      fake.pay(d.token);
+      await expire(d);
+
+      await sync(d.id);
+
+      expect(await row(d.id)).toMatchObject({
+        status: 'SUCCEEDED',
+        credited_rial: '10000',
+      });
+    });
+
+    const silent: [string, () => PaymentLookup][] = [
+      ['the PSP does not answer', () => ({ kind: 'UNAVAILABLE', reason: 'x' })],
+      ['the PSP does not know the token', () => ({ kind: 'NOT_FOUND' })],
+    ];
+    it.each(silent)(
+      '%s after expires_at: never expired on silence',
+      async (_c, lookup) => {
+        const d = await pending();
+        await expire(d);
+        spy.lookup = lookup;
+
+        await sync(d.id);
+
+        expect(await row(d.id)).toMatchObject({
+          status: 'PENDING',
+          failure_reason: null,
+        });
+      },
+    );
+
+    it('a PAID payment whose verify is unavailable after expires_at stays PENDING and retries', async () => {
+      const d = await pending();
+      fake.pay(d.token);
+      await expire(d);
+      spy.verifyAs = () => ({ kind: 'UNAVAILABLE', reason: 'HTTP_503' });
+
+      await sync(d.id);
+
+      expect(await row(d.id)).toMatchObject({ status: 'PENDING' });
+      secondsAround((await row(d.id)).next_in, 5);
+    });
+  });
 });

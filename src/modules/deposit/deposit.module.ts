@@ -7,12 +7,13 @@ import { MessagingModule } from '../messaging';
 import { PspCallbackController } from './callback/psp-callback.controller';
 import { PspCallbackService } from './callback/psp-callback.service';
 import { DepositController } from './deposit.controller';
+import { DepositDueWork } from './deposit.due-work';
 import { DepositService } from './deposit.service';
+import { DepositWatchdog } from './deposit.watchdog';
 import { DepositSyncHandler } from './handlers/deposit-sync.handler';
 import { DepositLifecycleRepository } from './repositories/deposit-lifecycle.repository';
 import { DepositsRepository } from './repositories/deposits.repository';
 
-/** The deposit use cases, for every role: the service, the callback intake, and the job handler the worker runs. */
 @Module({
   imports: [LedgerModule, IdempotencyModule, MessagingModule, PspModule],
   providers: [
@@ -20,10 +21,18 @@ import { DepositsRepository } from './repositories/deposits.repository';
     DepositsRepository,
     DepositLifecycleRepository,
     DepositSyncHandler,
+    DepositDueWork,
+    DepositWatchdog,
     InboundEvents,
     PspCallbackService,
   ],
-  exports: [DepositService, DepositSyncHandler, PspCallbackService],
+  exports: [
+    DepositService,
+    DepositSyncHandler,
+    DepositDueWork,
+    DepositWatchdog,
+    PspCallbackService,
+  ],
 })
 export class DepositModule {}
 

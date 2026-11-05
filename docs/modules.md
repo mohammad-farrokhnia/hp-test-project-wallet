@@ -208,7 +208,8 @@ The verifier compares the decoded digests with `timingSafeEqual` after checking 
 | `DepositService` | `create`, `get` |
 | `DepositStateMachine` (domain) | Transition table |
 | `DepositSyncHandler` | Consumer of `job.deposit.sync` |
-| `DepositDueWork` | `DueWorkSource`: due checks, expiry, the 2-minute unverified alert, abandoned creates |
+| `DepositDueWork` | `DueWorkSource`: `PENDING` deposits whose `next_check_at` is due become `job.deposit.sync` (the poller behind lost callbacks) |
+| `DepositWatchdog` | `DueWorkSource` that queues nothing: fails abandoned creates, flags and alerts on payments seen paid but unverified for 2 minutes |
 
 **`create(cmd, key)`**, two-phase (ADR-8). Before anything: DTO validation, then minimum 1,000 toman (422 `BELOW_MINIMUM`). Then `idempotency.claimWithLease(30 s)`:
 - `REPLAY` → stored response.
@@ -233,7 +234,7 @@ Next, `PspClient.createPayment(amountRial, orderId = depositId, callbackUrl)`. T
 **`DepositSyncHandler`:**
 1. `PspClient.getPayment(token)`.
 2. By the PSP status:
-   - `INIT` → reschedule on the poll schedule; once `expires_at` has passed → `FAILED (EXPIRED)` (the expiry is D6).
+   - `INIT` → reschedule on the poll schedule; once `expires_at` has passed → `FAILED (EXPIRED)`. Only INIT expires: a payment that is already PAID is verified and credited, and the PSP not answering never expires anything.
    - `PAID` or `VERIFIED` → `verify`. On `OK` (100) or `ALREADY_VERIFIED` (101), in one transaction: lock the deposit (compare-and-set PENDING → SUCCEEDED), `ledger.creditUser(DEPOSIT_CREDIT, verified amount)`, set `psp_ref_id` and `credited_rial`, transition row; `needs_review = AMOUNT_DIFFERS` if the verified amount ≠ requested. `UNAVAILABLE` (503) → retry in 5 s. `NOT_PAID` (−51) → re-read the status next round.
    - `FAILED` → `FAILED (PSP_FAILED)`.
    - `REVERSED` → `FAILED (PSP_REVERSED)`.
@@ -256,9 +257,9 @@ Next, `PspClient.createPayment(amountRial, orderId = depositId, callbackUrl)`. T
 |---|---|---|
 | Withdrawal due | `next_check_at <= now()`; bumps it 30 s ahead first | `job.withdrawal.submit` if PENDING, else `job.withdrawal.sync` |
 | Withdrawal review (`WithdrawalReviewSource`) | non-final, older than `REVIEW_AFTER_MINUTES` (30), not yet flagged; partial index `withdrawals_unflagged_open_idx` | sets `needs_review = STUCK`, logs an `ALERT`; queues nothing, moves no money, leaves `next_check_at` so it is still checked (W14) |
-| Deposit due | `next_check_at <= now()` | `job.deposit.sync` |
-| Deposit expiry | PENDING, `expires_at <= now()` | sync first; the handler fails it as `EXPIRED` only if the PSP still says INIT |
-| Deposit abandoned create | CREATED older than 10 min | `FAILED (CREATE_ABANDONED)`, key completed with that response |
+| Deposit due (`DepositDueWork`) | PENDING with `next_check_at <= now()`; bumps it first. Each sync sets the next check by the poll schedule (15 s, 15 s, 30 s, 60 s to 30 min, then 5 min), and expiry is decided by that sync: the handler fails the deposit as `EXPIRED` only if the PSP still says INIT | `job.deposit.sync` |
+| Deposit watchdog, abandoned create (`DepositWatchdog`) | CREATED older than `DEPOSIT_ABANDON_AFTER_MINUTES` (10); partial index `deposits_created_idx` | `FAILED (CREATE_ABANDONED)`; the key is left, and a retry with it answers from the failed deposit |
+| Deposit watchdog, unverified (`DepositWatchdog`) | PENDING, first seen paid more than `DEPOSIT_UNVERIFIED_ALERT_SECONDS` (120) ago, not yet flagged; partial index `deposits_unverified_idx` | sets `needs_review = UNVERIFIED_TOO_LONG`, logs an `ALERT`; queues nothing, fails nothing, leaves `next_check_at` so a late verify still credits (D13) |
 | Cleanup | hourly | idempotency keys (7 d), published outbox (3 d), inbound events (30 d) |
 | Invariants | every 5 min | `operations.InvariantsService.check()`; logs an alert on any violation |
 

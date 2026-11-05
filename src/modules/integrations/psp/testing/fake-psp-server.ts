@@ -71,6 +71,10 @@ export class FakePspServer {
     );
   }
 
+  verifyCalls(token: string): number {
+    return this.verifies.get(token) ?? 0;
+  }
+
   /** The payer completes the payment: `INIT → PAID`, with a bank reference. */
   pay(token: string): void {
     const p = this.payments.get(token);

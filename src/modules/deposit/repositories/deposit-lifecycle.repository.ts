@@ -19,6 +19,7 @@ export interface SyncRow {
   readonly pspToken: string | null;
   readonly checkAttempts: number;
   readonly createdAt: Date;
+  readonly expiresAt: Date;
 }
 
 /** What one sync changes. Fields left out are not touched. */
@@ -40,6 +41,7 @@ const COLUMNS = [
   'psp_token',
   'check_attempts',
   'created_at',
+  'expires_at',
 ] as const;
 
 /**
@@ -114,6 +116,7 @@ function toRow(r: {
   psp_token: string | null;
   check_attempts: number;
   created_at: Date;
+  expires_at: Date;
 }): SyncRow {
   return {
     id: r.id,
@@ -123,5 +126,6 @@ function toRow(r: {
     pspToken: r.psp_token,
     checkAttempts: r.check_attempts,
     createdAt: r.created_at,
+    expiresAt: r.expires_at,
   };
 }

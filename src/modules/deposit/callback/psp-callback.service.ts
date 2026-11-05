@@ -21,7 +21,7 @@ export type CallbackHeaders = Readonly<
 /**
  * @class PspCallbackService
  * @description `POST /webhooks/psp/callback/:depositId`. The PSP's callbacks are unsigned, duplicated, sometimes missing, sometimes lying
- * (`NOK` for a paid payment, an amount ×107), so a callback is only a hint. In one transaction it:
+ * (`NOK` for a paid payment, an amount ×10), so a callback is only a hint. In one transaction it:
  * 1. matches the path id, the body's `orderId` and the body's `token` to a stored deposit;
  * 2. records the delivery as received, whatever happened;
  * 3. for a match on a `PENDING` deposit, makes it due now and queues `job.deposit.sync`.

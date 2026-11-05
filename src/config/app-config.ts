@@ -30,6 +30,8 @@ export class AppConfig {
     depositExpiryMinutes: number;
     depositCreateLeaseSeconds: number;
     depositFirstCheckSeconds: number;
+    depositUnverifiedAlertSeconds: number;
+    depositAbandonAfterMinutes: number;
     reviewAfterMinutes: number;
     withdrawalSafetyNetSeconds: number;
     withdrawalSubmitLeaseSeconds: number;
@@ -101,6 +103,8 @@ export class AppConfig {
       depositExpiryMinutes: e.DEPOSIT_EXPIRY_MINUTES,
       depositCreateLeaseSeconds: e.DEPOSIT_CREATE_LEASE_SECONDS,
       depositFirstCheckSeconds: e.DEPOSIT_FIRST_CHECK_SECONDS,
+      depositUnverifiedAlertSeconds: e.DEPOSIT_UNVERIFIED_ALERT_SECONDS,
+      depositAbandonAfterMinutes: e.DEPOSIT_ABANDON_AFTER_MINUTES,
       reviewAfterMinutes: e.REVIEW_AFTER_MINUTES,
       withdrawalSafetyNetSeconds: e.WITHDRAWAL_SAFETY_NET_SECONDS,
       withdrawalSubmitLeaseSeconds: e.WITHDRAWAL_SUBMIT_LEASE_SECONDS,

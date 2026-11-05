@@ -113,6 +113,15 @@ npm test
 
 If PostgreSQL is not running, the unit tests still pass and the integration suite fails with `ECONNREFUSED`. If `.env.test` is missing, the run stops with an error pointing here.
 
+**Smoke run against the real PSP simulator (not part of `npm test`; needs the image from `docker load -i t103-simulator.tar.gz`):**
+
+```bash
+docker run --rm -p 8080:8080 -e SIM_CHAOS=hostile hamtapay/t103-simulator:1.0
+SMOKE_PSP_URL=http://127.0.0.1:8080 npx jest deposit.smoke
+```
+
+Run it with `SIM_CHAOS=off` and `hostile`. Callbacks go nowhere in this run, so each payment is found by polling alone, through the simulator's 503s. Without `SMOKE_PSP_URL` the spec is skipped.
+
 **Performance check (about a minute, not part of `npm test`):**
 
 ```bash

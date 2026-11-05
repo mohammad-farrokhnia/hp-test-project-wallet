@@ -262,5 +262,15 @@ describeDb('deposit schema (real PostgreSQL)', () => {
       );
       expect(defs).toContain('(user_id, created_at DESC)');
     });
+
+    it('has the watchdog queues: abandoned creates and unverified payments', async () => {
+      const rows = await ds.query<{ indexdef: string }[]>(
+        `SELECT indexdef FROM pg_indexes WHERE tablename = 'deposits'`,
+      );
+      const defs = rows.map((r) => r.indexdef).join('\n');
+      expect(defs).toContain(`(created_at) WHERE (status = 'CREATED'::text)`);
+      expect(defs).toContain('(paid_seen_at) WHERE');
+      expect(defs).toContain('NOT needs_review');
+    });
   });
 });

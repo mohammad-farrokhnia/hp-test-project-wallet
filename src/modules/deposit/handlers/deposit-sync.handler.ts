@@ -73,6 +73,7 @@ export class DepositSyncHandler implements JobHandler {
       requested: d.amount,
       checkAttempts: d.checkAttempts,
       ageSeconds: (Date.now() - d.createdAt.getTime()) / SECOND_MS,
+      expired: Date.now() >= d.expiresAt.getTime(),
     });
     const applied = await this.lifecycle.applySync(tx, id, {
       status: decision.to,

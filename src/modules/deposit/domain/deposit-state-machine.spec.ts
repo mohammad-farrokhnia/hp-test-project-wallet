@@ -11,6 +11,7 @@ const FRESH: PendingDeposit = {
   requested: REQUESTED,
   checkAttempts: 0,
   ageSeconds: 5,
+  expired: false,
 };
 
 const status = (

@@ -25,10 +25,12 @@ export interface PendingDeposit {
   readonly requested: Money;
   readonly checkAttempts: number;
   readonly ageSeconds: number;
+  readonly expired: boolean;
 }
 
 export interface SyncDecision {
-  readonly rule: 'D6' | 'D8' | 'D9' | 'D10' | 'D11' | 'D12' | 'D16' | 'WAIT';
+  readonly rule:
+    'D6' | 'D7' | 'D8' | 'D9' | 'D10' | 'D11' | 'D12' | 'D16' | 'WAIT';
   readonly to?: 'SUCCEEDED' | 'FAILED';
   readonly failureReason?: DepositFailureReason;
   readonly credit?: { readonly amount: Money; readonly refId: string };
@@ -69,6 +71,16 @@ export function decideDepositSync(
   const { status, verify } = observation;
   switch (status) {
     case 'INIT':
+      if (deposit.expired) {
+        return {
+          rule: 'D7',
+          to: 'FAILED',
+          failureReason: 'EXPIRED',
+          pspStatus: status,
+          paidSeen: false,
+          nextCheckSeconds: null,
+        };
+      }
       return {
         rule: 'D6',
         pspStatus: status,

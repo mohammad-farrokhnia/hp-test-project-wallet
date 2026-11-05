@@ -13,8 +13,10 @@ import {
 } from './modules/idempotency';
 import {
   DepositApiModule,
+  DepositDueWork,
   DepositModule,
   DepositSyncHandler,
+  DepositWatchdog,
 } from './modules/deposit';
 import { LedgerModule } from './modules/ledger';
 import {
@@ -70,8 +72,13 @@ const WORKER_MODULES: (Type | DynamicModule)[] = [
     imports: [WithdrawalModule, DepositModule],
   }),
   SchedulerModule.register({
-    sources: [WithdrawalDueWork, WithdrawalReviewSource],
-    imports: [WithdrawalModule],
+    sources: [
+      WithdrawalDueWork,
+      WithdrawalReviewSource,
+      DepositDueWork,
+      DepositWatchdog,
+    ],
+    imports: [WithdrawalModule, DepositModule],
   }),
 ];
 
