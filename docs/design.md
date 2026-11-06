@@ -128,4 +128,4 @@ There are 13 ADRs in `adr/`. These four shape everything else.
   - Withdrawal: a GET 404 for a transfer the provider already accepted is not a failure (PAY-14); it is rechecked and flagged `UNKNOWN_AFTER_SUCCESS` only after 30 min (W16–W19). A 200 replay whose fields differ from ours is flagged `REPLAY_MISMATCH` and stays frozen.
   - Deposit: a `CREATED` deposit whose PSP call never completed fails as `CREATE_ABANDONED` after 10 min; a verified bank reference already credited to another deposit is flagged `DUPLICATE_REF` and not credited twice.
   - Not built from v1: the `state_transitions` audit table, the restricted database role and the scheduled invariant check. History is reconstructed from journals, `payout_attempts` and `inbound_events`; `GET /internal/invariants` runs on demand.
-  - New documents: `overview.md`, `ambiguities.md`, `incident-analysis.md`, `scalability.md`, `running.md`, `api/openapi.yaml`, and provider notes v2 with three questions answered.
+  - New documents: `overview.md`, `ambiguities.md`, `incident-analysis.md`, `scalability.md`, `running.md`, `api/openapi.json`, and provider notes v2 with three questions answered.

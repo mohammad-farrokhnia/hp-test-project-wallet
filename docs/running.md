@@ -10,8 +10,6 @@ Everything here assumes the repository root as the working directory. Commands a
 | The simulator image | `hamtapay/t103-simulator:1.0` | The PSP and payout provider |
 | Node.js | 22 (see `.nvmrc`) | Running the app or the tests outside Docker, and the hardening tools |
 
-The simulator image is not on a registry. Load it once from the archive delivered with the brief:
-
 ```bash
 docker load -i t103-simulator.tar.gz
 ```
@@ -74,7 +72,7 @@ curl -s localhost:3000/deposits/<depositId>
 curl -s localhost:3000/internal/invariants               # "ok": true
 ```
 
-The full contract is in `docs/api/openapi.yaml`. Postman, Insomnia and Swagger UI all import it directly.
+The full contract is in `docs/api/openapi.json`. Postman, Insomnia and Swagger UI all import it directly.
 
 ## 4. Run the application outside Docker
 

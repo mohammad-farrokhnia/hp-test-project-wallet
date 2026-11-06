@@ -9,38 +9,6 @@ A wallet service with a double-entry ledger: users hold IRT (stored as rial) and
 - RabbitMQ (transactional outbox) 
 - Node 22.
 
-## Status
-
-Every required part of the brief and every bonus part is implemented and tested.
-
-| Part | Status |
-| --- | --- |
-| Wallet and double-entry ledger for IRT | Done (required) |
-| IRT deposit through the PSP | Done (required) |
-| IRT withdrawal to Sheba with the daily limit | Done (required) |
-| Idempotency on every financial request | Done (required) |
-| Manual credit by operations | Done (required) |
-| Integration tests, including concurrent withdrawals across two instances | Done (required) |
-| Design document, provider notes, Ambiguity #1, incident analysis | Done (required), in [docs/](docs/) |
-| USDT balance, TRC20 withdrawal and fee | Done (bonus) |
-| Transfers between users | Done (bonus) |
-| Balance events through RabbitMQ with an idempotent consumer | Done (bonus) |
-| Reconciliation with the PSP settlement file | Done (bonus) |
-| End-to-end test on the full stack | Done (bonus) |
-| Ambiguities #2 and #3, scalability analysis | Done (bonus) |
-
-The test suite has 1,368 tests: 39 unit spec files, 42 integration spec files against real PostgreSQL and RabbitMQ, and one end-to-end suite against the compose stack.
-
-### Not done, and how I would do it
-
-| Item | How |
-| --- | --- |
-| `deposit.status.changed` and `withdrawal.status.changed` events. The routing keys are bound, but only `wallet.balance.changed` is emitted, which is what the brief asks for | One `outbox.add` beside each compare-and-set status update, in the same transaction, and a test per transition |
-| Scheduled invariant check with alerting. `GET /internal/invariants` runs on demand only | A worker job every few minutes calling `InvariantsService.check()`, logging an `ALERT` and exporting a metric when `ok` is false |
-| An API for the review queue (`needs_review` records) | A paginated `GET /internal/reviews` over the existing partial indexes, and a resolve action that records who resolved what |
-| The `state_transitions` audit table and a restricted database role, both in the v1 design | One migration and one insert beside each status update; a role with `SELECT, INSERT` only on journals and postings |
-| A fresh database per test run | Create and drop a uniquely named `_test` database in Jest's global setup, so suites never see each other's leftovers |
-
 ## Architecture in brief
 
 One codebase and one image, started in one of three roles by `APP_ROLE`:
@@ -64,7 +32,7 @@ Design documents live in [docs/](docs/):
 | [adr/](docs/adr/) | The 13 decision records |
 | [overview.md](docs/overview.md) | Start here: flows, money model, guarantees and how they are tested, stack choices, known limitations |
 | [running.md](docs/running.md) | Running the stack, every test tier, the simulator modes, the hardening tools, extending the code |
-| [api/openapi.yaml](docs/api/openapi.yaml) | The API contract (imports into Postman, Insomnia or Swagger UI) |
+| [api/openapi.json](docs/api/openapi.json) | The API contract (imports into Postman, Insomnia or Swagger UI) |
 | [provider-notes.md](docs/provider-notes.md) | Simulator behaviour observed and how it changed the design; evidence in [evidence/](docs/evidence/) |
 | [ambiguities.md](docs/ambiguities.md) | The three deliberate ambiguities |
 | [incident-analysis.md](docs/incident-analysis.md) | The negative-balance incident |
