@@ -31,9 +31,7 @@ export interface CallbackTarget {
 /** A deposit as the settlement reconciliation sees it: only what it compares. */
 export interface BankReferenced {
   readonly id: string;
-  /** The PSP's bank reference, as stored. */
   readonly bankReference: string;
-  /** The same without leading zeros: the form the PSP's file is compared in. */
   readonly reference: string;
   readonly status: DepositStatus;
   readonly creditedRial: bigint | null;

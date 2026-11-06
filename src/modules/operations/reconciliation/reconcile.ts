@@ -1,4 +1,4 @@
-import type { BankReferenced } from '../../deposit/repositories/deposits.repository';
+import type { BankReferenced } from '../../deposit';
 import type {
   ParsedSettlement,
   SettlementRow,

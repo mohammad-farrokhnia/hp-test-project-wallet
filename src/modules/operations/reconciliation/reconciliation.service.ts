@@ -5,7 +5,7 @@ import { storable } from '../../../common/strings';
 import { isCalendarDay, jalaliDate, tehranDay } from '../../../common/time';
 import { TransactionRunner } from '../../../database/transaction-runner';
 import { DepositService } from '../../deposit';
-import type { BankReferenced } from '../../deposit/repositories/deposits.repository';
+import type { BankReferenced } from '../../deposit';
 import { PSP_CLIENT } from '../../integrations/psp';
 import type { PspClient } from '../../integrations/psp';
 import {

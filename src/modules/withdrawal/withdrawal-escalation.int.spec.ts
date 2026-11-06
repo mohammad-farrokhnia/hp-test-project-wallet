@@ -151,6 +151,12 @@ describeDb('withdrawal escalation and return watch (real PostgreSQL)', () => {
       config,
     ).handle(job('job.withdrawal.sync', id));
 
+  /**
+   * Age, in minutes, of a withdrawal that must be flagged: ten years. The review sweep takes the oldest open rows first, 1,000 at a time,
+   * and other suites leave committed open withdrawals in the shared test database, so a row only just past 30 minutes can sit outside the batch.
+   */
+  const LONG_AGO = 10 * 365 * 24 * 60;
+
   /** A withdrawal of 150,000 toman accepted by the provider (PROCESSING), aged `minutes`. */
   async function processing(
     minutes = 0,
@@ -221,7 +227,7 @@ describeDb('withdrawal escalation and return watch (real PostgreSQL)', () => {
 
   describe('escalation: needs_review after 30 minutes (W14)', () => {
     it('a stuck transfer is flagged STUCK with an alert, and stays frozen', async () => {
-      const { id, userId } = await processing(31);
+      const { id, userId } = await processing(LONG_AGO);
       const before = await state(id);
 
       expect(await sweepReview()).toEqual([]); // queues nothing
@@ -240,7 +246,7 @@ describeDb('withdrawal escalation and return watch (real PostgreSQL)', () => {
       });
       expect(alertsFor(id)).toEqual([
         expect.stringMatching(
-          /^ALERT withdrawal .* still PROCESSING after 3[01] min: flagged STUCK/,
+          /^ALERT withdrawal .* still PROCESSING after \d+ min: flagged STUCK/,
         ) as string,
       ]);
     });
@@ -267,14 +273,14 @@ describeDb('withdrawal escalation and return watch (real PostgreSQL)', () => {
     });
 
     it('flags and alerts once, however many sweeps run', async () => {
-      const { id } = await processing(45);
+      const { id } = await processing(LONG_AGO);
       await Promise.all([sweepReview(), sweepReview()]);
       await sweepReview();
       expect(alertsFor(id)).toHaveLength(1);
     });
 
     it('a flagged withdrawal is still resolved when the answer comes', async () => {
-      const { id, userId } = await processing(45);
+      const { id, userId } = await processing(LONG_AGO);
       await sweepReview();
       await sync(id, 'SUCCEEDED');
       expect(await state(id)).toMatchObject({
