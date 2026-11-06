@@ -1,5 +1,7 @@
 export * from './messaging.module';
 export * from './outbox/outbox.service';
+export { InboxService } from './inbox/inbox.service';
+export { MessagingRetentionModule } from './retention/messaging-retention.module';
 export { JobsModule } from './consumer/jobs.module';
 export { ATTEMPT_HEADER, JobConsumer } from './consumer/job-consumer';
 export type { JobContext, JobHandler } from './consumer/job-consumer';

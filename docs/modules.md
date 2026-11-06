@@ -24,8 +24,9 @@ Who calls whom:
 | operations | ledger, idempotency, withdrawal (open totals for the invariant check) |
 | withdrawal | ledger, idempotency, messaging, PayoutClient, WebhookVerifier, InboundEvents |
 | deposit | ledger, idempotency, messaging, PspClient, InboundEvents |
-| transfer (bonus) | ledger, idempotency |
-| ledger | messaging (balance events) |
+| transfer | ledger, idempotency |
+| notification | ledger (reads balances), messaging (inbox) |
+| ledger | messaging (the outbox, for balance events) |
 | scheduler | withdrawal and deposit, only through the `DueWorkSource` interface they implement |
 | messaging relay | delivers jobs to handlers in withdrawal and deposit |
 | core services and integrations | foundation |
@@ -65,15 +66,16 @@ Nothing points back: the ledger knows nothing about withdrawals, and the schedul
 ## Core modules
 
 ### ledger
-**Owns:** `accounts`, `journals`, `postings`. **Depends on:** messaging (balance events, bonus). **Used by:** every money flow.
+**Owns:** `accounts`, `journals`, `postings`. **Depends on:** messaging (the outbox, for balance events). **Used by:** every money flow.
 
 | Operation | Input → output | Transaction | Notes / errors |
 |---|---|---|---|
 | `ensureUserAccounts(tx, userId, currency)` | → account ids for AVAILABLE, FROZEN, DEBT | caller's | `INSERT … ON CONFLICT DO NOTHING`, then select; safe under concurrency |
 | `lockUserAccounts(tx, userId, currency)` | → locked balances `{available, frozen, debt}` | caller's | `SELECT … FOR UPDATE` in id order; used for pre-checks |
+| `lockUsersAccounts(tx, userIds, currency)` | → each user's ids and locked balances | caller's | For operations between users (transfers). Creates the accounts in sorted user order, then locks **all** of them in ONE ascending-id statement, so A→B and B→A can never deadlock (ADR-1) |
 | `post(tx, journal)` | `{kind, refId, currency, description?, reversesJournalId?, lines[{accountId, amount: Money}]}` → `{journalId, alreadyBooked}` | caller's | Validates first (≥ 2 non-zero lines, one currency, no account twice, sum 0); locks the accounts in id order (already-held rows don't wait); inserts the journal, whose `refType` follows from `kind`; computes `balance_after` per line and refuses a protected balance below zero or DEBT above zero; inserts the postings; updates the balances. A duplicate `(kind, ref)` writes nothing and returns the existing journal with `alreadyBooked = true`, so callers stay idempotent. Accounts are locked before the journal insert so a duplicate waits on the account lock instead of holding one. Failures are `LedgerError` (`INVALID_JOURNAL`, `ACCOUNT_NOT_FOUND`, `INSUFFICIENT_BALANCE`): caller bugs, so 500 at the edge |
 | `systemAccountId(tx, kind, currency)` | → account id | caller's | The seeded `PSP_CLEARING`, `PAYOUT_CLEARING`, `FEE_REVENUE` or `OPS_ADJUSTMENTS` account |
-| `creditLines({availableId, debtId, debt}, amount)` (domain, pure) | → posting lines | — | The only way money reaches a user: DEBT first, the rest to AVAILABLE. Used by `creditUser`, and inside transfer journals (bonus) |
+| `creditLines({availableId, debtId, debt}, amount)` (domain, pure) | → posting lines | — | The only way money reaches a user: DEBT first, the rest to AVAILABLE. Used by `creditUser`, and inside transfer journals |
 | `creditUser(tx, {userId, amount, source, kind, refId, description?})` | → `{journalId, alreadyBooked}` | caller's | One journal of `source −amount` + `creditLines`; locks AVAILABLE, DEBT and the source in id order before reading the debt |
 | `getBalances(tx, userId)` | → per currency `{available, frozen, debt}` | caller's (read) | No locks, no writes; unknown user returns zeros in every currency |
 | `listHistory(tx, userId, {beforeId?, limit})` | → postings with journal kind, ref, description; `nextBeforeId` | caller's (read) | Keyset `id < beforeId ORDER BY id DESC LIMIT limit + 1` on `postings (user_id, id DESC)`, journals joined by PK |
@@ -107,7 +109,8 @@ What gets stored: 2xx responses and state-dependent 422s (`INSUFFICIENT_FUNDS`, 
 | `RabbitConnection` (worker) | One amqplib recovering connection: boot never waits for the broker, reconnects with backoff (200 ms to 30 s), redeclares the topology after each connect, reopens the confirm channel after it closes. Host and port from `RABBITMQ_HOST`/`RABBITMQ_PORT` |
 | `RabbitPublisher` (worker) | Publisher confirms: resolves only on the broker's ack. Persistent, `mandatory`, `messageId`. A nack, no confirm within `RABBITMQ_PUBLISH_TIMEOUT_MS` (5 s) or a lost channel is retried `RABBITMQ_PUBLISH_RETRIES` (3) times with the same message id; an unroutable message fails at once (`UNROUTABLE`) |
 | `JobConsumer` (worker; one per `JobHandler`, listed in `JobsModule.register`) | Prefetch `JOB_PREFETCH` (10); parses the envelope; calls `handler.handle(envelope, {attempt})`; **acks only after it returns, i.e. after the handler's transaction committed**. RabbitMQ 4 does not count a `nack` with requeue toward the delivery limit (measured in M2), so attempts are counted in an `x-attempt` header: on a throw below `JOB_MAX_ATTEMPTS` (5) it waits `JOB_RETRY_BACKOFF_MS × attempt`, republishes a copy with `x-attempt + 1` (confirmed, same message id) and acks the original; at the limit it nacks without requeue, so the broker dead-letters it to `job.dead`. A body that is not an envelope goes to `job.dead` at once. A worker that dies mid-job never acked: the job comes back, and those lost deliveries count toward the queue's own limit (5), so that path also ends in `job.dead`. Re-subscribes whenever its channel closes (reconnect, broker cancel). `stop()` waits up to 10 s for jobs in progress; anything still running is redelivered. The row's `next_check_at` makes the sweeper retry later regardless |
-| `InboxService.markProcessed(tx, consumer, messageId)` | Bonus: returns false if already processed |
+| `InboxService.markProcessed(tx, consumer, messageId)` | Consumer-side de-duplication: inserts `(consumer, message_id)` in the consumer's own transaction; returns false if this consumer already handled the message. A rolled-back effect leaves no row, so its retry runs again |
+| `MessagingRetentionJob` (worker) | Every `RETENTION_INTERVAL_MINUTES` (60): deletes outbox rows **published** more than `OUTBOX_RETENTION_DAYS` (3) ago and inbox rows older than `INBOX_RETENTION_DAYS` (7), in batches of 1,000 with `SKIP LOCKED`. An unsent outbox row is never deleted |
 
 **Topology.**
 
@@ -117,7 +120,7 @@ What gets stored: 2xx responses and state-dependent 422s (`INSUFFICIENT_FUNDS`, 
 | | | `job.withdrawal.sync` → `job.withdrawal.sync` | `WithdrawalSyncHandler` |
 | | | `job.deposit.sync` → `job.deposit.sync` | `DepositSyncHandler` |
 | `wallet.dlx` | fanout | → `job.dead` | none (alert + manual) |
-| `wallet.events` (bonus) | topic | `wallet.balance.changed`, `deposit.status.changed`, `withdrawal.status.changed` → `notify.events` | `NotificationConsumer` (inbox de-dup) |
+| `wallet.events` | topic | `wallet.balance.changed`, `deposit.status.changed`, `withdrawal.status.changed` → quorum queue `notify.events` (same delivery limit and DLX as the job queues) | `NotificationHandler` (inbox de-dup). Only `wallet.balance.changed` is emitted so far |
 
 **Envelope:** `{messageId, type, aggregateType, aggregateId, occurredAt, payload}`; `messageId` is the outbox id, `type` the routing key, `payload` the row's ids. Ids only: handlers always reload state from the database, so a stale or duplicated message can't move money.
 
@@ -241,12 +244,21 @@ Next, `PspClient.createPayment(amountRial, orderId = depositId, callbackUrl)`. T
 
    The lookup and `verify` run outside any transaction; the decision is made on the row as locked. A bank reference that already credited another deposit violates `UNIQUE (psp_ref_id)`: that update is refused, the deposit is flagged `DUPLICATE_REF` with an alert and checked hourly, and the job ends normally, so money is never booked twice and no poison job loops. A deposit that is not `PENDING` costs no PSP call.
 
-### transfer (bonus)
-**Owns:** `transfers`. **Depends on:** ledger, idempotency.
+### transfer
+**Owns:** `transfers`. **Depends on:** ledger, idempotency. Invariant: opposite-direction transfers in parallel never deadlock-fail and money is conserved (tested with 100 simultaneous A→B / B→A, a ring of three, and first-use account creation races).
 
 | Endpoint | Operation |
 |---|---|
-| `POST /transfers` | One transaction: claim key → reject self-transfer (422 `SAME_USER`) → lock both users' accounts in id order → check sender available → `ledger.post(TRANSFER: sender AVAILABLE −x + creditLines(receiver))` → 201 `{transferId}` |
+| `POST /transfers` `{fromUserId, toUserId, currency: IRT\|USDT, amount}` | 422 `SAME_USER` first (not stored). Then ONE transaction: claim key → `ledger.lockUsersAccounts([from, to])` (all accounts, one ascending-id lock order) → sender must hold the amount and owe nothing, else a stored 422 `INSUFFICIENT_FUNDS` → `ledger.post(TRANSFER: sender AVAILABLE −x + creditLines(receiver))`, so the receiver's DEBT is paid off first → `transfers` row → stored 201 `{transferId}`. No fee. The ledger writes the balance events of both users in the same transaction |
+
+### notification
+**Owns:** `notifications`. **Depends on:** ledger (read), messaging (inbox). The consumer of balance events (`notify.events`), loaded by the worker.
+
+| Unit | Responsibility |
+|---|---|
+| `NotificationHandler` | For a `wallet.balance.changed` message, in ONE transaction: `InboxService.markProcessed('notification', messageId)` (false → stop, a duplicate delivery changes nothing), then reload the user's balances and insert one `notifications` row. The message carries ids only (`userId`, `currency`, `journalId`, `kind`), never an amount to act on. Other event types and unreadable payloads are acked and ignored: no retry could change either |
+
+**Balance events.** `LedgerService.post` is the only writer of money, so it is the only emitter: for every journal it books, in the same transaction, it writes one `wallet.balance.changed` outbox row per user whose balance the journal changed (system accounts announce nothing; a duplicate booking, which writes no postings, writes no event). So an event exists exactly when the money moved: a crash after commit leaves the row in the outbox for the relay, and a rollback leaves nothing. Delivery is at least once; the inbox makes the effect exactly once.
 
 ### scheduler (worker role)
 **Owns:** nothing. Calls the `DueWorkSource` implementations (listed in `SchedulerModule.register`) every `SWEEPER_INTERVAL_MS` (5 s), at once again while a source returns a full batch (`SWEEPER_BATCH_SIZE`, 100).
@@ -260,7 +272,7 @@ Next, `PspClient.createPayment(amountRial, orderId = depositId, callbackUrl)`. T
 | Deposit due (`DepositDueWork`) | PENDING with `next_check_at <= now()`; bumps it first. Each sync sets the next check by the poll schedule (15 s, 15 s, 30 s, 60 s to 30 min, then 5 min), and expiry is decided by that sync: the handler fails the deposit as `EXPIRED` only if the PSP still says INIT | `job.deposit.sync` |
 | Deposit watchdog, abandoned create (`DepositWatchdog`) | CREATED older than `DEPOSIT_ABANDON_AFTER_MINUTES` (10); partial index `deposits_created_idx` | `FAILED (CREATE_ABANDONED)`; the key is left, and a retry with it answers from the failed deposit |
 | Deposit watchdog, unverified (`DepositWatchdog`) | PENDING, first seen paid more than `DEPOSIT_UNVERIFIED_ALERT_SECONDS` (120) ago, not yet flagged; partial index `deposits_unverified_idx` | sets `needs_review = UNVERIFIED_TOO_LONG`, logs an `ALERT`; queues nothing, fails nothing, leaves `next_check_at` so a late verify still credits (D13) |
-| Cleanup | hourly | idempotency keys (7 d), published outbox (3 d), inbound events (30 d) |
+| Cleanup | hourly | idempotency keys (7 d), published outbox (3 d), inbox ids (7 d), inbound events (30 d) |
 | Invariants | every 5 min | `operations.InvariantsService.check()`; logs an alert on any violation |
 
 The sweeper publishes directly to RabbitMQ rather than through the outbox. Its work is re-derivable from rows: if a publish fails, or RabbitMQ restarts and loses the queue, the row is due again after the bump and the next sweep queues it (tested by dropping the connection and purging the queue, and with a real `docker compose restart rabbitmq` in `npm run test:chaos`).

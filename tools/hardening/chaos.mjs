@@ -3,6 +3,7 @@
 //   A  api SIGKILLed mid POST /deposits burst, hostile simulator     D  RabbitMQ SIGKILLed twice under load
 //   B  workers SIGKILLed while paid deposits sync                    E  out-of-order and forged webhooks and callbacks
 //   C  Postgres restarted then SIGKILLed under deposit + withdrawal load   F  simulator restarted (provider state lost)
+//   I  transfers and balance events under load with kills: conserved, one per key, each event delivered once
 //   H  USDT withdrawals end to end: fee, CRYPTO payout, one daily cap shared with IRT
 //   G  money races: parallel withdrawals against one balance and against the daily limit
 // Clients retry the way real ones do; afterwards it checks one deposit/withdrawal per key, no double credit, invariants, eventual completion.
@@ -246,6 +247,56 @@ const scenarios = {
     const wrongD = items[0].final?.creditedAmount;
     say(`  deposit with a forged 999999999 callback credited: ${wrongD} toman (must be 1000)`);
     if (wrongD !== '1000') problem(`E: forged amount credited ${wrongD}`);
+  },
+  async I() {
+    say('I: transfers and balance events under load, with a worker, RabbitMQ and an API replica killed mid-stream');
+    await setSimulator('default'); await waitHealthy();
+    const users = Array.from({ length: 12 }, (_, i) => `chI_${run}_${i}`);
+    const inList = users.map((u) => `'${u}'`).join(',');
+    for (const u of users) await untilDone('POST', '/internal/adjustments', { userId: u, currency: 'IRT', amount: '1000000', reason: 'chaos seed' }, { 'idempotency-key': `seed-${u}` });
+    const N = 300;
+    const jobs = Array.from({ length: N }, (_, i) => {
+      const a = users[i % 12];
+      let b = users[(i * 7 + 3) % 12];
+      if (b === a) b = users[(i + 1) % 12];
+      return { key: `tr-${run}-${i}`, a, b };
+    });
+    const chaos = (async () => {
+      await sleep(800); await crash('wallet-worker-1', 2000);
+      await sleep(500); await crash('wallet-rabbitmq-1', 4000);
+      await sleep(500); await crash('wallet-api-2', 1500);
+      await sleep(500); await crash('wallet-worker-2', 2000);
+    })();
+    const results = await Promise.all(jobs.map((j) => untilDone('POST', '/transfers', { fromUserId: j.a, toUserId: j.b, currency: 'IRT', amount: '7' }, { 'idempotency-key': j.key })));
+    await chaos; await waitHealthy(150);
+    const ok = results.filter((r) => r.status === 201);
+    const other = results.filter((r) => r.status !== 201);
+    say(`  ${ok.length}/${N} transfers answered 201; others: ${JSON.stringify(other.slice(0, 3).map((r) => `${r.status} ${r.text.slice(0, 60)}`))}`);
+    if (ok.length !== N) problem(`I: ${other.length} transfers never got a 201`);
+    const ids = new Set(ok.map((r) => r.body.transferId));
+    const rows = psql(`SELECT count(*) FROM transfers WHERE from_user_id IN (${inList}) AND to_user_id IN (${inList})`)[0][0];
+    say(`  distinct transfer ids ${ids.size}; transfer rows ${rows}`);
+    if (String(ids.size) !== rows || ids.size !== ok.length) problem(`I: ${ok.length} answers, ${ids.size} distinct ids, ${rows} rows: a key made more or fewer than one transfer`);
+    const sum = psql(`SELECT coalesce(sum(balance_minor), 0) FROM accounts WHERE user_id IN (${inList}) AND currency = 'IRR'`)[0][0];
+    say(`  money held by the 12 users: ${sum} rial (must be 120000000)`);
+    if (sum !== '120000000') problem(`I: money not conserved: ${sum}`);
+    const journals = psql(`SELECT count(*) FROM journals j JOIN transfers t ON t.journal_id = j.id WHERE t.from_user_id IN (${inList})`)[0][0];
+    if (journals !== rows) problem(`I: ${journals} journals for ${rows} transfers`);
+
+    const eventState = () => psql(`SELECT count(*), count(*) FILTER (WHERE published_at IS NULL) FROM outbox WHERE exchange = 'wallet.events' AND aggregate_id IN (${inList})`)[0];
+    const notes = () => psql(`SELECT count(*), count(DISTINCT message_id) FROM notifications WHERE user_id IN (${inList})`)[0];
+    const t0 = Date.now();
+    let [events, unsent] = eventState(); let [n, distinct] = notes();
+    while ((unsent !== '0' || n !== events) && Date.now() - t0 < 150000) {
+      await sleep(2000);
+      [events, unsent] = eventState(); [n, distinct] = notes();
+    }
+    say(`  balance events ${events} (2 per transfer + 1 per seed = ${2 * N + 12} expected), unsent ${unsent}; notifications ${n}, distinct ${distinct}; settled after ${((Date.now() - t0) / 1000).toFixed(0)}s`);
+    if (events !== String(2 * N + 12)) problem(`I: expected ${2 * N + 12} events, found ${events}`);
+    if (unsent !== '0') problem(`I: ${unsent} events never published`);
+    if (n !== events) problem(`I: ${events} events but ${n} notifications`);
+    if (distinct !== n) problem(`I: duplicate notifications (${n} rows, ${distinct} distinct messages)`);
+    await globalChecks('I');
   },
   async H() {
     say('H: USDT withdrawals on the real stack and simulator: fee, CRYPTO payout, and one daily cap shared with IRT');

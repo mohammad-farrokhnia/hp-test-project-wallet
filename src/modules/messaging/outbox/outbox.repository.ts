@@ -143,4 +143,31 @@ export class OutboxRepository {
       .where('published_at', 'is', null)
       .execute();
   }
+
+  /**
+   * @function deletePublishedOlderThan
+   * @description Deletes up to `limit` rows published more than `days` ago, oldest first. Unsent rows are never touched.
+   * `SKIP LOCKED` lets two workers purge at once without waiting on each other.
+   * @returns how many rows were deleted
+   */
+  async deletePublishedOlderThan(
+    tx: Tx,
+    days: number,
+    limit: number,
+  ): Promise<number> {
+    const { rows } = await sql<{ id: string }>`
+      WITH doomed AS (
+        SELECT id FROM outbox
+         WHERE published_at IS NOT NULL
+           AND published_at < now() - make_interval(days => ${days})
+         ORDER BY published_at
+         LIMIT ${limit}
+           FOR UPDATE SKIP LOCKED
+      )
+      DELETE FROM outbox o
+       USING doomed
+       WHERE o.id = doomed.id
+      RETURNING o.id`.execute(db(tx));
+    return rows.length;
+  }
 }

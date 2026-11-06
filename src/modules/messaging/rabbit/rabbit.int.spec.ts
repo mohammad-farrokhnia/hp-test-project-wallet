@@ -13,6 +13,7 @@ import {
   DEAD_QUEUE,
   declareTopology,
   DELIVERY_LIMIT,
+  EVENTS_EXCHANGE,
   JOB_NAMES,
   JOBS_EXCHANGE,
   TOPOLOGY,
@@ -232,6 +233,8 @@ describe('RabbitMQ topology and publisher (real broker)', () => {
         });
       }
       await ch.checkExchange(DEAD_LETTER_EXCHANGE);
+      await ch.checkExchange(EVENTS_EXCHANGE);
+      await ch.checkQueue('notify.events');
       expect(JOB_NAMES).toHaveLength(3);
       await ch.close();
     } finally {

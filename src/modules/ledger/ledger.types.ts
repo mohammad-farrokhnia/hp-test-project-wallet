@@ -16,7 +16,7 @@ export type {
   InvariantName,
   ViolationRow,
 } from './domain/invariants';
-export { clawbackLines } from './domain/credit';
+export { clawbackLines, creditLines } from './domain/credit';
 export { LedgerError } from './domain/ledger.error';
 export type { LedgerErrorCode } from './domain/ledger.error';
 

@@ -120,7 +120,7 @@ erDiagram
     }
 ```
 
-Not drawn, because nothing references them: `outbox`, `inbox`, `inbound_events`, `state_transitions`.
+Not drawn, because nothing references them: `outbox`, `inbox`, `notifications`, `inbound_events`, `state_transitions`.
 
 ## Ledger tables (owned by the ledger module)
 
@@ -322,10 +322,10 @@ Every submit to the payout service, opened **before** the call.
 | `reconciliation_runs` | id uuid PK · settlement_date date · started_at · finished_at · settlement_rows int · matched int · mismatch_count int · raw_csv text |
 | `reconciliation_mismatches` | id bigint PK · run_id FK · type (`MISSING_IN_LEDGER`, `MISSING_IN_SETTLEMENT`, `AMOUNT_MISMATCH`, `DUPLICATE_IN_SETTLEMENT`) · reference (bank refId) · deposit_id uuid null · our_amount_rial · their_amount_rial · details jsonb |
 
-## Transfer table (bonus)
+## Transfer table
 
 ### `transfers`
-id uuid PK · from_user_id · to_user_id · currency · amount_minor `> 0` · journal_id unique FK · created_at · `CHECK (from_user_id <> to_user_id)`.
+id uuid PK · from_user_id · to_user_id · currency `IRR` \| `USDT` · amount_minor `> 0` · journal_id bigint FK → journals, `UNIQUE` · created_at · `CHECK (from_user_id <> to_user_id)` and valid user ids (`^[A-Za-z0-9_-]{1,64}$`). `INDEX (from_user_id, created_at DESC)` and `(to_user_id, created_at DESC)`.
 
 ## Cross-cutting tables
 
@@ -362,10 +362,13 @@ id uuid PK · from_user_id · to_user_id · currency · amount_minor `> 0` · jo
 | attempts | int | no | default 0 |
 | last_error | text | yes | |
 
-- `INDEX (id) WHERE published_at IS NULL`. Published rows are deleted after 3 days.
+- `INDEX (id) WHERE published_at IS NULL` (the relay's queue) and `INDEX (published_at) WHERE published_at IS NOT NULL` (the purge's). Published rows are deleted after `OUTBOX_RETENTION_DAYS` (3); an unsent row never is.
 
-### `inbox` (bonus, owned by messaging)
-`(consumer text, message_id text)` PK · processed_at. A consumer inserts its message id in the same transaction as its effect; a duplicate insert means "already applied".
+### `inbox` (owned by messaging)
+`(consumer text, message_id text)` PK · processed_at `INDEX (processed_at)`. A consumer inserts its message id in the same transaction as its effect; a duplicate insert means "already applied". Ids are purged after `INBOX_RETENTION_DAYS` (7).
+
+### `notifications` (owned by the notification module)
+id bigint identity PK · message_id text `UNIQUE` (the envelope's id, backing the inbox up) · user_id · kind `BALANCE_CHANGED` · currency · journal_id bigint · available_minor, frozen_minor, debt_minor (the balances as read when the message was handled) · created_at. `INDEX (user_id, id DESC)`.
 
 ### `inbound_events` (owned by integrations)
 Every PSP callback and payout webhook exactly as received, rejected ones included. This is both an audit trail and evidence.

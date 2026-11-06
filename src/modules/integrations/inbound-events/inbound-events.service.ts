@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { sql } from 'kysely';
 import { db } from '../../../database/kysely';
 import { Tx } from '../../../database/transaction-runner';
 
@@ -55,5 +56,26 @@ export class InboundEvents {
       .returning('id')
       .executeTakeFirstOrThrow();
     return BigInt(row.id);
+  }
+
+  /**
+   * @function deleteOlderThan
+   * @description Deletes up to `limit` recorded events received more than `days` ago, oldest first; `SKIP LOCKED` as for every purge.
+   * @returns how many rows were deleted
+   */
+  async deleteOlderThan(tx: Tx, days: number, limit: number): Promise<number> {
+    const { rows } = await sql<{ id: string }>`
+      WITH doomed AS (
+        SELECT id FROM inbound_events
+         WHERE received_at < now() - make_interval(days => ${days})
+         ORDER BY received_at
+         LIMIT ${limit}
+           FOR UPDATE SKIP LOCKED
+      )
+      DELETE FROM inbound_events e
+       USING doomed
+       WHERE e.id = doomed.id
+      RETURNING e.id`.execute(db(tx));
+    return rows.length;
   }
 }

@@ -18,15 +18,22 @@ import {
   DepositSyncHandler,
   DepositWatchdog,
 } from './modules/deposit';
+import { InboundEventsRetentionModule } from './modules/integrations/inbound-events';
 import { LedgerModule } from './modules/ledger';
 import {
   JobsModule,
   MessagingModule,
+  MessagingRetentionModule,
   OutboxRelayModule,
   RabbitModule,
 } from './modules/messaging';
+import {
+  NotificationHandler,
+  NotificationModule,
+} from './modules/notification';
 import { OperationsModule } from './modules/operations';
 import { SchedulerModule } from './modules/scheduler';
+import { TransferApiModule } from './modules/transfer';
 import { WalletModule } from './modules/wallet';
 import {
   WithdrawalApiModule,
@@ -57,10 +64,13 @@ const API_MODULES: Type[] = [
   WalletModule,
   DepositApiModule,
   WithdrawalApiModule,
+  TransferApiModule,
 ];
 
 const WORKER_MODULES: (Type | DynamicModule)[] = [
   IdempotencyCleanupModule,
+  InboundEventsRetentionModule,
+  MessagingRetentionModule,
   RabbitModule,
   OutboxRelayModule,
   JobsModule.register({
@@ -68,8 +78,9 @@ const WORKER_MODULES: (Type | DynamicModule)[] = [
       WithdrawalSubmitHandler,
       WithdrawalSyncHandler,
       DepositSyncHandler,
+      NotificationHandler,
     ],
-    imports: [WithdrawalModule, DepositModule],
+    imports: [WithdrawalModule, DepositModule, NotificationModule],
   }),
   SchedulerModule.register({
     sources: [

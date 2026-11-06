@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { CurrencyCode } from '../../common/money';
 import { foldBalances } from './domain/balances';
 import { Tx } from '../../database/transaction-runner';
+import { BALANCE_CHANGED, EVENTS_EXCHANGE, OutboxService } from '../messaging';
 import {
   JournalInput,
   planPostings,
@@ -40,6 +41,7 @@ export class LedgerService {
     private readonly journals: JournalsRepository,
     private readonly checks: LedgerChecksRepository,
     private readonly history: HistoryRepository,
+    private readonly outbox: OutboxService,
   ) {}
 
   /**
@@ -100,6 +102,53 @@ export class LedgerService {
       frozen: balance(ids.frozen),
       debt: balance(ids.debt),
     };
+  }
+
+  /**
+   * @function lockUsersAccounts
+   * @description For an operation that moves money between users: creates each user's accounts on first use,
+   * then locks every account of all of them in ONE ascending-id statement and reads the balances.
+   * That single global order is what keeps two opposite-direction operations from deadlocking:
+   * both wait on the same first row instead of each holding what the other needs. Accounts are created in sorted user order for the same reason.
+   * @param tx - the caller's transaction
+   * @param userIds - the users involved, in any order
+   * @param currency - `IRR` or `USDT`
+   * @returns each user's ids and locked balances
+   */
+  async lockUsersAccounts(
+    tx: Tx,
+    userIds: readonly string[],
+    currency: CurrencyCode,
+  ): Promise<Map<string, LockedUserAccounts>> {
+    const users = [...new Set(userIds)].sort();
+    const idsOf = new Map<string, UserAccountIds>();
+    for (const userId of users) {
+      idsOf.set(userId, await this.ensureUserAccounts(tx, userId, currency));
+    }
+    const locked = await this.accounts.lockAccountsById(
+      tx,
+      [...idsOf.values()].flatMap((i) => [i.available, i.frozen, i.debt]),
+    );
+    const balance = (id: bigint) => {
+      const a = locked.get(id);
+      if (!a)
+        throw new LedgerError('ACCOUNT_NOT_FOUND', `account ${id} vanished`);
+      return a.balance;
+    };
+    return new Map(
+      users.map((userId) => {
+        const ids = idsOf.get(userId) as UserAccountIds;
+        return [
+          userId,
+          {
+            ids,
+            available: balance(ids.available),
+            frozen: balance(ids.frozen),
+            debt: balance(ids.debt),
+          },
+        ];
+      }),
+    );
   }
 
   /**
@@ -177,7 +226,8 @@ export class LedgerService {
    * 2. lock every account in ascending id order;
    * 3. insert the journal; if `(kind, ref)` is already booked, stop and return it;
    * 4. compute each balance after and refuse a protected balance below zero;
-   * 5. append the postings with `balance_after`, then update the balances.
+   * 5. append the postings with `balance_after`, then update the balances;
+   * 6. write one `wallet.balance.changed` outbox event per user whose balance this journal changed, in the same transaction (a duplicate booking writes none).
    * Locks come before the journal insert so a duplicate waits on the account lock instead of holding one, which keeps the lock order intact.
    * @param tx - the caller's transaction
    * @param journal - the event to book
@@ -203,7 +253,40 @@ export class LedgerService {
     for (const p of postings) {
       await this.accounts.setBalance(tx, p.account.id, p.balanceAfter);
     }
+    await this.announceBalanceChanges(tx, journal, journalId, postings);
     return { journalId, alreadyBooked: false };
+  }
+
+  /**
+   * @function announceBalanceChanges
+   * @description The outbox event for every balance change: one per user per journal, written in the journal's own transaction,
+   * so it exists exactly when the money moved. Ids only: the consumer reloads the balances. System accounts have no owner and announce nothing.
+   */
+  private async announceBalanceChanges(
+    tx: Tx,
+    journal: JournalInput,
+    journalId: bigint,
+    postings: readonly {
+      readonly account: { readonly userId: string | null };
+    }[],
+  ): Promise<void> {
+    const users = new Set<string>();
+    for (const p of postings) {
+      if (p.account.userId !== null) users.add(p.account.userId);
+    }
+    for (const userId of [...users].sort()) {
+      await this.outbox.add(tx, {
+        exchange: EVENTS_EXCHANGE,
+        routingKey: BALANCE_CHANGED,
+        aggregate: { type: 'WALLET', id: userId },
+        payload: {
+          userId,
+          currency: journal.currency,
+          journalId: journalId.toString(),
+          kind: journal.kind,
+        },
+      });
+    }
   }
 
   /**

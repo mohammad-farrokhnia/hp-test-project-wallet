@@ -189,6 +189,42 @@ for (const [name, path, body, ct] of [
   results.push({ name: `  (${name}: must answer ${allowed.join('/')})`, status: r.status, bad: !allowed.includes(r.status) });
 }
 
+// ---------- transfers
+{
+  const a = user();
+  const b = user();
+  await raw('POST', '/internal/adjustments', { headers: jsonH({ 'idempotency-key': key() }), body: J({ userId: a, currency: 'IRT', amount: '1000', reason: 'fuzz seed' }) });
+  const t = (body, k = key()) => ({ headers: jsonH({ 'idempotency-key': k }), body: typeof body === 'string' ? body : J(body) });
+  const ok = { fromUserId: a, toUserId: b, currency: 'IRT', amount: '10' };
+  for (const [name, body] of [
+    ['self transfer', { ...ok, toUserId: a }],
+    ['zero', { ...ok, amount: '0' }],
+    ['negative', { ...ok, amount: '-1' }],
+    ['not a number', { ...ok, amount: 'x' }],
+    ['overflow', { ...ok, amount: '9'.repeat(30) }],
+    ['USDT with 7 decimals', { ...ok, currency: 'USDT', amount: '1.1234567' }],
+    ['USDT near the 64-bit maximum', { ...ok, currency: 'USDT', amount: '9223372036854.775807' }],
+    ['unknown currency', { ...ok, currency: 'EUR' }],
+    ['sender id with a space', { ...ok, fromUserId: 'a b' }],
+    ['receiver id empty', { ...ok, toUserId: '' }],
+    ['receiver id null', { ...ok, toUserId: null }],
+    ['sql in the receiver id', { ...ok, toUserId: "x'; DROP TABLE transfers;--" }],
+    ['more than the sender holds', { ...ok, amount: '5000' }],
+    ['extra field', { ...ok, fee: '1' }],
+    ['array body', [ok]],
+    ['unknown sender, no funds', { ...ok, fromUserId: user() }],
+  ]) await check(`transfer ${name}`, 'POST', '/transfers', t(body), { mustReject: true });
+  await check('transfer no key', 'POST', '/transfers', { headers: jsonH(), body: J(ok) }, { expect: 400 });
+  await check('transfer deep nesting', 'POST', '/transfers', t('['.repeat(5000) + ']'.repeat(5000)), { mustReject: true });
+  const k = key();
+  const first = await check('transfer valid', 'POST', '/transfers', t(ok, k), { expect: 201 });
+  const again = await check('transfer replay', 'POST', '/transfers', t(ok, k), { expect: 201 });
+  results.push({ name: 'transfer replay returns the same id', status: again.json?.transferId === first.json?.transferId ? 'ok' : 'WRONG', bad: again.json?.transferId !== first.json?.transferId });
+  await check('transfer same key, other amount', 'POST', '/transfers', t({ ...ok, amount: '11' }, k), { expect: 422 });
+  const rs = await Promise.all(Array.from({ length: 10 }, () => raw('POST', '/transfers', t({ fromUserId: b, toUserId: a, currency: 'IRT', amount: '1' }))));
+  results.push({ name: 'transfer 10 concurrent returns', status: rs.map((r) => r.status).sort().join(','), bad: rs.some((r) => typeof r.status !== 'number' || r.status >= 500) });
+}
+
 for (const [m, p] of [['DELETE', '/deposits/x'], ['PUT', '/deposits'], ['PATCH', '/withdrawals/x'], ['GET', '/deposits'], ['GET', '/withdrawals'], ['POST', '/wallets/x'], ['OPTIONS', '/deposits'], ['HEAD', '/health'], ['GET', '/nope'], ['POST', '/webhooks'], ['GET', '/webhooks/payout'], ['GET', '/internal/adjustments'], ['TRACE', '/health'], ['GET', '//deposits'], ['GET', '/deposits/'], ['GET', '/%'], ['GET', '/..%2f..%2f']])
   await check(`${m} ${p}`, m, p, {});
 await check('very long url', 'GET', '/deposits/' + 'a'.repeat(20000), {});

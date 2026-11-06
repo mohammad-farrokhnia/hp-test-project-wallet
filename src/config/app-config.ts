@@ -57,6 +57,12 @@ export class AppConfig {
     retentionDays: number;
     cleanupIntervalMinutes: number;
   };
+  readonly retention: {
+    outboxDays: number;
+    inboxDays: number;
+    inboundEventsDays: number;
+    intervalMinutes: number;
+  };
 
   constructor(e: Env) {
     this.role = e.APP_ROLE;
@@ -130,6 +136,12 @@ export class AppConfig {
     this.idempotency = {
       retentionDays: e.IDEMPOTENCY_RETENTION_DAYS,
       cleanupIntervalMinutes: e.IDEMPOTENCY_CLEANUP_INTERVAL_MINUTES,
+    };
+    this.retention = {
+      outboxDays: e.OUTBOX_RETENTION_DAYS,
+      inboxDays: e.INBOX_RETENTION_DAYS,
+      inboundEventsDays: e.INBOUND_EVENTS_RETENTION_DAYS,
+      intervalMinutes: e.RETENTION_INTERVAL_MINUTES,
     };
     Object.freeze(this);
   }

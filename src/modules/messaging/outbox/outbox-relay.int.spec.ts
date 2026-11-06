@@ -4,7 +4,11 @@ import { randomUUID } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { DataSource } from 'typeorm';
 import { loadConfig } from '../../../config/app-config';
-import { connectTestDb, describeDb } from '../../../database/int-testing';
+import {
+  connectTestDb,
+  describeDb,
+  lockOutboxRelays,
+} from '../../../database/int-testing';
 import { TransactionRunner } from '../../../database/transaction-runner';
 import { RabbitConnection } from '../rabbit/rabbit-connection';
 import { OutgoingMessage, RabbitPublisher } from '../rabbit/rabbit-publisher';
@@ -33,15 +37,23 @@ class FakePublisher implements Publisher {
   }
 }
 
+/**
+ * Every test drains the shared outbox, other suites' rows included, so under a full parallel run it needs more than Jest's 5 s.
+ * `beforeAll` may also wait for the end-to-end suite to release the relay lock.
+ */
+jest.setTimeout(120_000);
+
 describeDb('OutboxRelay (real PostgreSQL)', () => {
   let ds: DataSource;
   let runner: TransactionRunner;
+  let unlockRelays: () => Promise<void>;
   const repo = new OutboxRepository();
 
   beforeAll(async () => {
     jest.spyOn(Logger.prototype, 'warn').mockImplementation();
     jest.spyOn(Logger.prototype, 'log').mockImplementation();
     ds = await connectTestDb();
+    unlockRelays = await lockOutboxRelays(ds);
     runner = new TransactionRunner(ds, {
       lockTimeoutMs: 5000,
       statementTimeoutMs: 10_000,
@@ -49,6 +61,7 @@ describeDb('OutboxRelay (real PostgreSQL)', () => {
   });
 
   afterAll(async () => {
+    await unlockRelays?.();
     if (ds?.isInitialized) await ds.destroy();
     jest.restoreAllMocks();
   });

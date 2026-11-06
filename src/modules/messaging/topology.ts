@@ -8,6 +8,21 @@ export const JOB_NAMES = [
 ] as const;
 export type JobName = (typeof JOB_NAMES)[number];
 
+/** Event queues; each is bound to `wallet.events` by the routing keys in `EVENT_ROUTING_KEYS`. */
+export const EVENT_QUEUES = ['notify.events'] as const;
+export type EventQueue = (typeof EVENT_QUEUES)[number];
+
+/** Anything a `JobConsumer` can read: a job queue or an event queue. */
+export type QueueName = JobName | EventQueue;
+
+/** Emitted by the ledger, in the transaction of every journal, once per user whose balance it changed. */
+export const BALANCE_CHANGED = 'wallet.balance.changed';
+export const EVENT_ROUTING_KEYS = [
+  BALANCE_CHANGED,
+  'deposit.status.changed',
+  'withdrawal.status.changed',
+] as const;
+
 export const JOBS_EXCHANGE = 'wallet.jobs';
 export const EVENTS_EXCHANGE = 'wallet.events';
 export const DEAD_LETTER_EXCHANGE = 'wallet.dlx';
@@ -37,7 +52,7 @@ export interface Topology {
 
 /**
  * @function buildTopology
- * @description The broker layout as data. Job queues are quorum queues (replicated, durable) with a delivery limit;
+ * @description The broker layout as data. Job and event queues are quorum queues (replicated, durable) with a delivery limit;
  * @param prefix - prepended to every exchange and queue name; empty in the app, unique per test so tests never touch real queues
  * @returns the topology
  */
@@ -46,10 +61,11 @@ export function buildTopology(prefix = ''): Topology {
   return {
     exchanges: [
       { name: n(JOBS_EXCHANGE), type: 'direct' },
+      { name: n(EVENTS_EXCHANGE), type: 'topic' },
       { name: n(DEAD_LETTER_EXCHANGE), type: 'fanout' },
     ],
     queues: [
-      ...JOB_NAMES.map((job) => ({
+      ...[...JOB_NAMES, ...EVENT_QUEUES].map((job) => ({
         name: n(job),
         arguments: {
           'x-queue-type': 'quorum',
@@ -65,6 +81,13 @@ export function buildTopology(prefix = ''): Topology {
         exchange: n(JOBS_EXCHANGE),
         routingKey: job,
       })),
+      ...EVENT_QUEUES.flatMap((queue) =>
+        EVENT_ROUTING_KEYS.map((routingKey) => ({
+          queue: n(queue),
+          exchange: n(EVENTS_EXCHANGE),
+          routingKey,
+        })),
+      ),
       {
         queue: n(DEAD_QUEUE),
         exchange: n(DEAD_LETTER_EXCHANGE),

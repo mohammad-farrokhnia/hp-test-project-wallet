@@ -20,10 +20,15 @@ const url =
   `/${encodeURIComponent(env.POSTGRES_DB || 'wallet')}`;
 
 function run(cmd, args, extraEnv = {}) {
-  const r = spawnSync(cmd, args, {
-    stdio: 'inherit',
-    env: { ...env, ...extraEnv },
-  });
+  const options = { stdio: 'inherit', env: { ...env, ...extraEnv } };
+  const r =
+    process.platform === 'win32'
+      ? spawnSync([cmd, ...args].join(' '), { ...options, shell: true })
+      : spawnSync(cmd, args, options);
+  if (r.error) {
+    console.error(`db:types: could not run ${cmd}: ${r.error.message}`);
+    process.exit(1);
+  }
   if (r.status !== 0) process.exit(r.status ?? 1);
 }
 

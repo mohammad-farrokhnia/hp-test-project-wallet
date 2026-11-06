@@ -3,7 +3,7 @@ import type { Channel, ConsumeMessage } from 'amqplib';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { Envelope, parseEnvelope } from '../envelope';
 import type { Publisher } from '../rabbit/rabbit-publisher';
-import type { JobName } from '../topology';
+import type { QueueName } from '../topology';
 
 /** Header carrying how many times this job has been tried; RabbitMQ 4 does not count nacks for us. */
 export const ATTEMPT_HEADER = 'x-attempt';
@@ -16,7 +16,7 @@ export interface JobContext {
  * A job handler: does its work in its own transaction and returns once that committed. It is acked only then.
  */
 export interface JobHandler {
-  readonly job: JobName;
+  readonly job: QueueName;
   handle(envelope: Envelope, ctx: JobContext): Promise<void>;
 }
 

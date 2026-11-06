@@ -101,6 +101,12 @@ export interface InboundEvents {
   source: string;
 }
 
+export interface Inbox {
+  consumer: string;
+  message_id: string;
+  processed_at: Generated<Timestamp>;
+}
+
 export interface Journals {
   created_at: Generated<Timestamp>;
   currency: string;
@@ -110,6 +116,19 @@ export interface Journals {
   ref_id: string;
   ref_type: string;
   reverses_journal_id: Int8 | null;
+}
+
+export interface Notifications {
+  available_minor: Int8;
+  created_at: Generated<Timestamp>;
+  currency: string;
+  debt_minor: Int8;
+  frozen_minor: Int8;
+  id: Generated<Int8>;
+  journal_id: Int8;
+  kind: string;
+  message_id: string;
+  user_id: string;
 }
 
 export interface Outbox {
@@ -148,6 +167,16 @@ export interface Postings {
   id: Generated<Int8>;
   journal_id: Int8;
   user_id: string | null;
+}
+
+export interface Transfers {
+  amount_minor: Int8;
+  created_at: Generated<Timestamp>;
+  currency: string;
+  from_user_id: string;
+  id: string;
+  journal_id: Int8;
+  to_user_id: string;
 }
 
 export interface WithdrawalDailyUsage {
@@ -193,10 +222,13 @@ export interface DB {
   deposits: Deposits;
   idempotency_keys: IdempotencyKeys;
   inbound_events: InboundEvents;
+  inbox: Inbox;
   journals: Journals;
+  notifications: Notifications;
   outbox: Outbox;
   payout_attempts: PayoutAttempts;
   postings: Postings;
+  transfers: Transfers;
   withdrawal_daily_usage: WithdrawalDailyUsage;
   withdrawals: Withdrawals;
 }

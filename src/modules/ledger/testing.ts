@@ -1,3 +1,5 @@
+import { OutboxService } from '../messaging';
+import { OutboxRepository } from '../messaging/outbox/outbox.repository';
 import { LedgerService } from './ledger.service';
 import { AccountsRepository } from './repositories/accounts.repository';
 import { HistoryRepository } from './repositories/history.repository';
@@ -6,7 +8,7 @@ import { LedgerChecksRepository } from './repositories/ledger-checks.repository'
 
 /**
  * @function newLedgerService
- * @description A `LedgerService` wired with its real repositories, for tests that run without Nest.
+ * @description A `LedgerService` wired with its real repositories and outbox, for tests that run without Nest.
  * @returns the service
  */
 export function newLedgerService(): LedgerService {
@@ -15,5 +17,6 @@ export function newLedgerService(): LedgerService {
     new JournalsRepository(),
     new LedgerChecksRepository(),
     new HistoryRepository(),
+    new OutboxService(new OutboxRepository()),
   );
 }
