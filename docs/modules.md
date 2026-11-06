@@ -276,7 +276,7 @@ Next, `PspClient.createPayment(amountRial, orderId = depositId, callbackUrl)`. T
 | Deposit watchdog, abandoned create (`DepositWatchdog`) | CREATED older than `DEPOSIT_ABANDON_AFTER_MINUTES` (10); partial index `deposits_created_idx` | `FAILED (CREATE_ABANDONED)`; the key is left, and a retry with it answers from the failed deposit |
 | Deposit watchdog, unverified (`DepositWatchdog`) | PENDING, first seen paid more than `DEPOSIT_UNVERIFIED_ALERT_SECONDS` (120) ago, not yet flagged; partial index `deposits_unverified_idx` | sets `needs_review = UNVERIFIED_TOO_LONG`, logs an `ALERT`; queues nothing, fails nothing, leaves `next_check_at` so a late verify still credits (D13) |
 | Cleanup | hourly | idempotency keys (7 d), published outbox (3 d), inbox ids (7 d), inbound events (30 d) |
-| Invariants | **not scheduled** | Planned every 5 min with an alert; only the on-demand `GET /internal/invariants` was built. Listed as a known gap in `overview.md` |
+| Invariants (`InvariantsCheckJob`) | every `INVARIANTS_CHECK_INTERVAL_MINUTES` (5) | `InvariantsService.check()`, the same checks as `GET /internal/invariants`; logs `ALERT invariants broken: <check> (<count>)` at error level on any violation. Reads only |
 
 The sweeper publishes directly to RabbitMQ rather than through the outbox. Its work is re-derivable from rows: if a publish fails, or RabbitMQ restarts and loses the queue, the row is due again after the bump and the next sweep queues it (tested by dropping the connection and purging the queue, and with a real `docker compose restart rabbitmq` in `npm run test:chaos`).
 

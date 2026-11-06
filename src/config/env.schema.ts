@@ -97,6 +97,7 @@ export const envSchema = z.object({
   INBOX_RETENTION_DAYS: int(7),
   INBOUND_EVENTS_RETENTION_DAYS: int(30),
   RETENTION_INTERVAL_MINUTES: int(60),
+  INVARIANTS_CHECK_INTERVAL_MINUTES: int(5),
 });
 
 export type Env = z.infer<typeof envSchema>;

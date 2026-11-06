@@ -31,7 +31,7 @@ import {
   NotificationHandler,
   NotificationModule,
 } from './modules/notification';
-import { OperationsModule } from './modules/operations';
+import { InvariantsCheckModule, OperationsModule } from './modules/operations';
 import { SchedulerModule } from './modules/scheduler';
 import { TransferApiModule } from './modules/transfer';
 import { WalletModule } from './modules/wallet';
@@ -71,6 +71,7 @@ const WORKER_MODULES: (Type | DynamicModule)[] = [
   IdempotencyCleanupModule,
   InboundEventsRetentionModule,
   MessagingRetentionModule,
+  InvariantsCheckModule,
   RabbitModule,
   OutboxRelayModule,
   JobsModule.register({

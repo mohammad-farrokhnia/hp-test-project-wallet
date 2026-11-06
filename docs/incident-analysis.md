@@ -30,4 +30,4 @@ To this failure, yes, by construction:
 - **The database refuses a negative balance** with a CHECK constraint, even if the code is wrong.
 - **Drift is detectable.** `GET /internal/invariants` checks that every balance equals the sum of its postings.
 
-Not immune to contention: a hot wallet's requests queue on its row lock and fail with 503 after 3 s, never with wrong money. The gap I would close first: the invariant check runs only on demand; in production it should run every few minutes and alert.
+Not immune to contention: a hot wallet's requests queue on its row lock and fail with 503 after 3 s, never with wrong money. The same check runs every 5 minutes in the workers and logs an `ALERT` on any violation, so a drift like this one is found by the system, not by a user.

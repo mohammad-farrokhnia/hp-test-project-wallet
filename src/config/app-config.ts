@@ -57,6 +57,9 @@ export class AppConfig {
     retentionDays: number;
     cleanupIntervalMinutes: number;
   };
+  readonly invariants: {
+    checkIntervalMinutes: number;
+  };
   readonly retention: {
     outboxDays: number;
     inboxDays: number;
@@ -136,6 +139,9 @@ export class AppConfig {
     this.idempotency = {
       retentionDays: e.IDEMPOTENCY_RETENTION_DAYS,
       cleanupIntervalMinutes: e.IDEMPOTENCY_CLEANUP_INTERVAL_MINUTES,
+    };
+    this.invariants = {
+      checkIntervalMinutes: e.INVARIANTS_CHECK_INTERVAL_MINUTES,
     };
     this.retention = {
       outboxDays: e.OUTBOX_RETENTION_DAYS,

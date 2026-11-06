@@ -108,7 +108,7 @@ A partial unique index allows a withdrawal to be settled **or** released, never 
 | Critical data survives the loss of any component except the database | No Redis; the broker holds only ids; retry times live in `next_check_at` | `broker-restart.int.spec.ts`, chaos scenario D (RabbitMQ killed twice under load) |
 | A paid deposit is always credited, never more than paid | Pull-to-decide; verified amount only; poller; `UNIQUE psp_ref_id` | `deposit-sync.handler.int.spec.ts`, `deposit-lifecycle.int.spec.ts`, smoke run against the real simulator |
 
-At the time of writing the suite has 39 unit spec files, 42 integration spec files against real PostgreSQL and RabbitMQ, and one end-to-end suite against the full compose stack: 1,368 tests in total.
+At the time of writing the suite has 40 unit spec files, 42 integration spec files against real PostgreSQL and RabbitMQ, and one end-to-end suite against the full compose stack: 1,372 tests in total.
 
 ## 7. Why this stack
 
@@ -127,7 +127,7 @@ At the time of writing the suite has 39 unit spec files, 42 integration spec fil
 These are the points I would raise myself in a review.
 
 1. **Status events are declared but not produced.** `deposit.status.changed` and `withdrawal.status.changed` are bound to the `notify.events` queue, but only `wallet.balance.changed` is emitted. The brief asks for notification after every balance change, which is met. Adding status events means one `outbox.add` beside each compare-and-set status update, in the same transaction.
-2. **The invariant check runs on demand only.** `GET /internal/invariants` works, but no job runs it periodically or alerts. In production it should run every few minutes.
+2. **The invariant check alerts only through the log.** The workers run it every 5 minutes (`INVARIANTS_CHECK_INTERVAL_MINUTES`) and log an `ALERT` on any violation. There is no metrics endpoint yet, so the alert depends on someone watching the logs. Each run scans all postings, which at large scale would move to a read replica or an incremental check.
 3. **The review queue has no API.** Records flagged `needs_review` (STUCK, LATE_SUCCESS, REPLAY_MISMATCH, UNVERIFIED_TOO_LONG, DUPLICATE_REF and others) are visible in `GET /withdrawals/{id}` and `GET /deposits/{id}`, and alerts are logged, but listing and resolving them is done in the database.
 4. **Debt is per currency.** A user with IRT debt cannot withdraw IRT but can still withdraw USDT. Collecting across currencies is a business decision I did not make on my own.
 5. **The USDT daily-limit rate is configured, not live** (Ambiguity #2). It is snapshotted per withdrawal, so accounting stays correct when it changes.
