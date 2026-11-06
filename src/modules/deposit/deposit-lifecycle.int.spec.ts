@@ -5,7 +5,11 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../../app.module';
-import { connectTestDb, describeDb } from '../../database/int-testing';
+import {
+  connectTestDb,
+  describeDb,
+  lockDueWork,
+} from '../../database/int-testing';
 import { TransactionRunner, Tx } from '../../database/transaction-runner';
 import { HttpPspClient } from '../integrations/psp/http-psp.client';
 import { FakePspServer } from '../integrations/psp/testing/fake-psp-server';
@@ -35,6 +39,7 @@ interface WalletBody {
  */
 describeDb('deposit lifecycle against the fake PSP (real PostgreSQL)', () => {
   let ds: DataSource;
+  let unlockDueWork: (() => Promise<void>) | undefined;
   let app: INestApplication<App>;
   let handler: DepositSyncHandler;
   const psp = new FakePspServer();
@@ -47,6 +52,7 @@ describeDb('deposit lifecycle against the fake PSP (real PostgreSQL)', () => {
       jest.spyOn(Logger.prototype, level).mockImplementation();
     }
     ds = await connectTestDb();
+    unlockDueWork = await lockDueWork(ds);
     psp.script = {
       onCreate: () => 'ok',
       verify503: (token, attempt) => verify503.has(token) && attempt === 1,
@@ -71,9 +77,10 @@ describeDb('deposit lifecycle against the fake PSP (real PostgreSQL)', () => {
       newLedgerService(),
       new HttpPspClient(pspUrl, 1000),
     );
-  });
+  }, 180_000);
 
   afterAll(async () => {
+    await unlockDueWork?.();
     await app?.close();
     await psp.stop();
     if (ds?.isInitialized) await ds.destroy();

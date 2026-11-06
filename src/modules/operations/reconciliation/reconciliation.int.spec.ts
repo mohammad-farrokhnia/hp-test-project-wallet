@@ -30,18 +30,52 @@ interface Credited {
   amountRial: bigint;
 }
 
+/**
+ * @function unusedPastDays
+ * @description Every day from 2001 to 2024 (28 per month) that has no reconciliation run and no deposit credited on it, in random order.
+ */
+async function unusedPastDays(ds: DataSource): Promise<string[]> {
+  const used = new Set(
+    (
+      await ds.query<{ day: string }[]>(
+        `SELECT to_char(settlement_date, 'YYYY-MM-DD') AS day FROM reconciliation_runs
+         UNION
+         SELECT to_char((completed_at AT TIME ZONE 'Asia/Tehran')::date, 'YYYY-MM-DD')
+           FROM deposits WHERE status = 'SUCCEEDED' AND completed_at < '2025-01-01'`,
+      )
+    ).map((r) => r.day),
+  );
+  const days: string[] = [];
+  for (let year = 2001; year <= 2024; year++) {
+    for (let month = 1; month <= 12; month++) {
+      for (let d = 1; d <= 28; d++) {
+        const day = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+        if (!used.has(day)) days.push(day);
+      }
+    }
+  }
+  for (let i = days.length - 1; i > 0; i--) {
+    const j = randomInt(i + 1);
+    [days[i], days[j]] = [days[j], days[i]];
+  }
+  return days;
+}
+
 describeDb('settlement reconciliation (real PostgreSQL, fake PSP)', () => {
   let ds: DataSource;
   let app: NestExpressApplication;
   let handler: DepositSyncHandler;
   const psp = new FakePspServer();
   const savedEnv = { ...process.env };
+  const freeDays: string[] = [];
+  const takenDays: string[] = [];
 
   beforeAll(async () => {
     jest.spyOn(Logger.prototype, 'warn').mockImplementation();
     jest.spyOn(Logger.prototype, 'error').mockImplementation();
     jest.spyOn(Logger.prototype, 'log').mockImplementation();
     ds = await connectTestDb();
+    freeDays.push(...(await unusedPastDays(ds)));
     const pspUrl = await psp.start();
     Object.assign(process.env, {
       PSP_BASE_URL: pspUrl,
@@ -68,7 +102,17 @@ describeDb('settlement reconciliation (real PostgreSQL, fake PSP)', () => {
   afterAll(async () => {
     await app?.close();
     await psp.stop();
-    if (ds?.isInitialized) await ds.destroy();
+    if (ds?.isInitialized) {
+      await ds.query(
+        'DELETE FROM reconciliation_mismatches WHERE run_id IN (SELECT id FROM reconciliation_runs WHERE settlement_date = ANY($1::date[]))',
+        [takenDays],
+      );
+      await ds.query(
+        'DELETE FROM reconciliation_runs WHERE settlement_date = ANY($1::date[])',
+        [takenDays],
+      );
+      await ds.destroy();
+    }
     process.env = savedEnv;
     jest.restoreAllMocks();
   });
@@ -77,9 +121,17 @@ describeDb('settlement reconciliation (real PostgreSQL, fake PSP)', () => {
     psp.settlementFault = 'ok';
   });
 
-  /** A day long past, chosen at random: our deposits are moved onto it, so a run sees these tests' deposits and nobody else's. */
-  const pastDay = () =>
-    `${randomInt(2001, 2024)}-${String(randomInt(1, 13)).padStart(2, '0')}-${String(randomInt(1, 29)).padStart(2, '0')}`;
+  /**
+   * A day long past that nothing has used: our deposits are moved onto it, so a run sees these tests' deposits and nobody else's.
+   * Days come from a shuffled pool that leaves out every day an earlier run of this suite left runs or credited deposits on, because the database outlives the suite.
+   */
+  const pastDay = (): string => {
+    const day = freeDays.pop();
+    if (!day)
+      throw new Error('no unused past day is left in the test database');
+    takenDays.push(day);
+    return day;
+  };
 
   /** A deposit made over HTTP, paid at the fake PSP and credited by the real sync: its bank reference is the PSP's. */
   async function credit(toman: number): Promise<Credited> {
@@ -183,7 +235,7 @@ describeDb('settlement reconciliation (real PostgreSQL, fake PSP)', () => {
   });
 
   describe('seeded mismatches are all reported, each with the right type (B5)', () => {
-    const day = pastDay();
+    let day: string;
     let a: Credited;
     let b: Credited;
     let c: Credited;
@@ -192,6 +244,7 @@ describeDb('settlement reconciliation (real PostgreSQL, fake PSP)', () => {
     let res: request.Response;
 
     beforeAll(async () => {
+      day = pastDay();
       [a, b, c, d] = [
         await credit(1000),
         await credit(2000),

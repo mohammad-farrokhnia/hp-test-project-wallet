@@ -1,4 +1,4 @@
-# Tests:  docker compose --profile test run --rm test
+# Tests:  docker compose --profile test run --rm test   (starts the whole stack, runs every suite and the end-to-end journey)
 # One-time prerequisite: docker load -i t103-simulator.tar.gz   (image hamtapay/t103-simulator:1.0)
 #
 # Config comes from .env (optional, see .env.example): compose reads it for ${VAR}
@@ -150,10 +150,16 @@ services:
       <<: *app-env
       POSTGRES_DB: ${POSTGRES_TEST_DB:-wallet_test}
       CI: "true"
+      # The end-to-end suite (src/e2e) drives the running stack through nginx and the simulator.
+      # The other suites use the *_test database and their own broker prefixes, so they never touch the stack's data.
+      E2E_BASE_URL: http://app:${PORT:-3000}
+      E2E_SIMULATOR_URL: http://simulator:8080
     depends_on:
       postgres: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
       simulator: { condition: service_healthy }
+      app: { condition: service_healthy }
+      worker: { condition: service_healthy }
 
 volumes:
   pgdata:

@@ -35,6 +35,22 @@ export async function connectTestDb(): Promise<DataSource> {
 /** Arbitrary key shared by every suite that runs a real `OutboxRelay`. */
 const OUTBOX_RELAY_LOCK = 7_410_001;
 
+/** Arbitrary key shared by every suite that sweeps, or counts on, the due deposits and withdrawals. */
+const DUE_WORK_LOCK = 7_410_002;
+
+async function holdAdvisoryLock(
+  ds: DataSource,
+  key: number,
+): Promise<() => Promise<void>> {
+  const qr = ds.createQueryRunner();
+  await qr.connect();
+  await qr.query('SELECT pg_advisory_lock($1)', [key]);
+  return async () => {
+    await qr.query('SELECT pg_advisory_unlock($1)', [key]);
+    await qr.release();
+  };
+}
+
 /**
  * @function lockOutboxRelays
  * @description Serialises the suites that run a real `OutboxRelay`. A relay publishes EVERY unsent outbox row, other suites' included,
@@ -43,14 +59,18 @@ const OUTBOX_RELAY_LOCK = 7_410_001;
  * @param ds - the suite's DataSource
  * @returns the function that releases the lock, to call in `afterAll`
  */
-export async function lockOutboxRelays(
-  ds: DataSource,
-): Promise<() => Promise<void>> {
-  const qr = ds.createQueryRunner();
-  await qr.connect();
-  await qr.query('SELECT pg_advisory_lock($1)', [OUTBOX_RELAY_LOCK]);
-  return async () => {
-    await qr.query('SELECT pg_advisory_unlock($1)', [OUTBOX_RELAY_LOCK]);
-    await qr.release();
-  };
+export function lockOutboxRelays(ds: DataSource): Promise<() => Promise<void>> {
+  return holdAdvisoryLock(ds, OUTBOX_RELAY_LOCK);
+}
+
+/**
+ * @function lockDueWork
+ * @description Serialises the suites that sweep the due deposits and withdrawals, or that set rows due and expect to find them. A committed sweep bumps `next_check_at`
+ * on EVERY due row, other suites' included, so a suite running beside it can lose the rows it just made due. Same kind of lock as `lockOutboxRelays`.
+ * Waiting for it can outlast Jest's default hook timeout, so call it from a `beforeAll` with a long one.
+ * @param ds - the suite's DataSource
+ * @returns the function that releases the lock, to call in `afterAll`
+ */
+export function lockDueWork(ds: DataSource): Promise<() => Promise<void>> {
+  return holdAdvisoryLock(ds, DUE_WORK_LOCK);
 }

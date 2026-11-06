@@ -3,7 +3,11 @@ import { randomUUID } from 'node:crypto';
 import { DataSource } from 'typeorm';
 import { Money } from '../../common/money';
 import { AppConfig, loadConfig } from '../../config/app-config';
-import { connectTestDb, describeDb } from '../../database/int-testing';
+import {
+  connectTestDb,
+  describeDb,
+  lockDueWork,
+} from '../../database/int-testing';
 import { TransactionRunner, Tx } from '../../database/transaction-runner';
 import { newIdempotencyService } from '../idempotency/testing';
 import { HttpPspClient } from '../integrations/psp/http-psp.client';
@@ -22,6 +26,7 @@ class Rollback extends Error {}
 
 describeDb('deposit sweeper sources (real PostgreSQL)', () => {
   let ds: DataSource;
+  let unlockDueWork: (() => Promise<void>) | undefined;
   let runner: TransactionRunner;
   let service: DepositService;
   let config: AppConfig;
@@ -39,6 +44,7 @@ describeDb('deposit sweeper sources (real PostgreSQL)', () => {
     jest.spyOn(Logger.prototype, 'warn').mockImplementation();
     error = jest.spyOn(Logger.prototype, 'error').mockImplementation();
     ds = await connectTestDb();
+    unlockDueWork = await lockDueWork(ds);
     fake.script = { onCreate: () => fault, verify503: () => false };
     runner = new TransactionRunner(ds, {
       lockTimeoutMs: 10_000,
@@ -53,9 +59,10 @@ describeDb('deposit sweeper sources (real PostgreSQL)', () => {
       new HttpPspClient(await fake.start(), 1000),
       config,
     );
-  });
+  }, 180_000);
 
   afterAll(async () => {
+    await unlockDueWork?.();
     await fake.stop();
     if (ds?.isInitialized) await ds.destroy();
     jest.restoreAllMocks();

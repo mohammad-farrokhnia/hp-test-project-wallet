@@ -142,16 +142,17 @@ What gets stored: 2xx responses and state-dependent 422s (`INSUFFICIENT_FUNDS`, 
 | `POST /internal/adjustments` | `AdjustmentsService.create({userId, currency, amount, reason, actor}, key)` | one: claim → `ledger.creditUser` (ADJUSTMENT_CREDIT from OPS_ADJUSTMENTS, DEBT first; creates accounts on first use) → insert adjustment (it references the journal) → complete | `201 {adjustmentId, journalId, userId, currency, amount}`; `adjustmentId` is UUIDv7, `journalId` a string; guard; `@FinancialPost`; `reason` 3–500 chars; `amount` > 0 (IRT whole toman, stored as rial); `X-Operator-Id` optional, 1–128 printable ASCII, stored as `actor` |
 | `GET /internal/invariants` | `InvariantsService.check()` = `ledger.checkLedger()` + `FROZEN_EQUALS_OPEN_WITHDRAWALS` (FROZEN equals `openTotals()` per user and currency) | own: read-only, REPEATABLE READ, so every check sees one snapshot | `200 {ok, checkedAt, checks: [{name, ok, violations, truncated}]}`, also when `ok` is false. For the live demo and alerts. Lives here, not in ledger, so the ledger never depends on withdrawal. Open totals come through the `OpenWithdrawalTotals` port, which withdrawal implements (X3); until then nothing may be frozen |
 | `GET /internal/reviews` | lists deposits and withdrawals with `needs_review` | read | Optional ops view |
-| `POST /reconciliation/run` (bonus) | `ReconciliationService.run(date)` | own | Fetch CSV, match by refId, store run + mismatches, change no money; no Idempotency-Key |
+| `POST /reconciliation/run` `{date?}` · `GET /reconciliation/runs/:id` | `ReconciliationService.run(date)` | own: the PSP file is fetched first, our side is read in one read-only REPEATABLE READ transaction, the report is stored last | Behind `INTERNAL_API_KEY` when set; no Idempotency-Key (a run only reads: repeating it makes another report). `date` is a Tehran day, today when omitted; a day that does not exist or is in the future is 400. No file, or a file whose header is not the one in PSP-12, is 503 `PROVIDER_UNAVAILABLE` and nothing is stored |
+| | `reconcile(...)` (pure) | n/a | Matches the file with our credited deposits **by bank reference without zero padding**, never by day. Reports: `MISSING_IN_LEDGER` (the PSP settled a reference no credited deposit holds), `MISSING_IN_SETTLEMENT` (we credited it that Tehran day and the file lacks it; `details.nearDayStart` when within 5 minutes of the day's start, as it may be in the previous file), `AMOUNT_MISMATCH` (rial on both sides), `DUPLICATE_IN_SETTLEMENT` (one reference on several rows; the first is compared), `UNREADABLE_ROW` (a row that cannot be read, or is dated another day: nothing is skipped silently). Amounts are rial and named so. It changes no deposit, journal or balance |
 
 ### withdrawal
 **Owns:** `withdrawals`, `payout_attempts`, `withdrawal_daily_usage`. **Depends on:** ledger, idempotency, messaging, payout, inbound events.
 
 | Unit | Responsibility |
 |---|---|
-| `WithdrawalController` | `POST /withdrawals`, `GET /withdrawals/:id`, `POST /withdrawals/:id/cancel` (bonus) |
+| `WithdrawalController` | `POST /withdrawals`, `GET /withdrawals/:id`, `POST /withdrawals/:id/cancel` |
 | `PayoutWebhookController` | `POST /webhooks/payout`: raw-body HMAC, record, schedule sync, 200 |
-| `WithdrawalService` | `request`, `get`, `cancel`, `openTotals()` (Σ amount + fee of non-final withdrawals per user and currency) |
+| `WithdrawalService` | `request`, `get`, `cancel(id, key)`, `openTotals()` (Σ amount + fee of non-final withdrawals per user and currency) |
 | `WithdrawalPolicy` (domain) | `buildPolicies(config.limits)`: per currency the minimum, fee, destination type and the rial counted toward the daily limit. IRR: 100,000 toman, no fee, IBAN, counted in full. USDT: 10 USDT, 1 USDT fee, TRC20, counted toward the toman cap at `USDT_IRT_REFERENCE_RATE` (toman per USDT, default 100,000), rounded up, fee not counted (ADR-12). `quoteWithdrawal(policy, amount)` → `{amount, fee, total = amount + fee, limitAmountRial, limitRateRialPerUsdt}` (the rate is saved on the withdrawal row), or `BELOW_MINIMUM`, or `TOO_LARGE` when amount + fee cannot be held (400) |
 | `WithdrawalStateMachine` (domain) | The transition table in `state-machines.md`; `next(status, event)` |
 | `WithdrawalOutcomeService` | Applies a provider snapshot: journals, status, flags, `next_check_at`, transition row, events |
@@ -159,6 +160,8 @@ What gets stored: 2xx responses and state-dependent 422s (`INSUFFICIENT_FUNDS`, 
 | `WithdrawalSubmitHandler` | Consumer of `job.withdrawal.submit` |
 | `WithdrawalSyncHandler` | Consumer of `job.withdrawal.sync` |
 | `WithdrawalDueWork` | Implements the scheduler's `DueWorkSource` |
+
+**`cancel(id, key)`** (Ambiguity #3): only while `PENDING`. One transaction in lock order (key → withdrawal row → accounts → daily usage): claim the Idempotency-Key (the withdrawal id is part of its fingerprint, so one key cannot cancel two withdrawals); lock the row and **wait** for it, so a submit in progress finishes first; `PENDING` → `FAILED (CANCELLED)` by compare-and-set, the `WITHDRAWAL_RELEASE` journal (amount + fee, so a USDT fee comes back too), the day's limit given back, 200 with the withdrawal. Once the worker has claimed it (`SUBMITTING` and later) the provider may already have the transfer, so cancelling would free money that can still be paid: 409 `CANCEL_NOT_ALLOWED`, nothing stored, nothing changed (a `FAILED` withdrawal that was not cancelled gets the same 409). Cancelling one that is already `CANCELLED` is the same 200: the state asked for is the state it is in. The submit job queued with the request finds a cancelled withdrawal `FAILED` and does nothing, and the submit job locks with `SKIP LOCKED` while cancel waits, so exactly one of them wins a race.
 
 **Body:** `{userId, currency: "IRT" | "USDT", amount, destination}`; the destination type follows from the currency (IRT → Sheba IBAN, spaces/lowercase accepted and normalised; USDT → TRC20).
 
@@ -306,7 +309,7 @@ Adapter rules: one keep-alive HTTP agent per provider; 10 s timeout per call; ev
 | 401 | `INVALID_SIGNATURE` | payout webhook HMAC mismatch |
 | 404 | `NOT_FOUND` | unknown deposit, withdrawal or route |
 | 409 | `IDEMPOTENCY_IN_PROGRESS` | twin request still running |
-| 409 | `CANCEL_NOT_ALLOWED` | bonus: cancel after submission |
+| 409 | `CANCEL_NOT_ALLOWED` | cancel once the withdrawal is no longer `PENDING` |
 | 422 | `BELOW_MINIMUM` | under 100,000 toman / 10 USDT / 1,000 toman deposit |
 | 422 | `INSUFFICIENT_FUNDS` | available < amount + fee |
 | 422 | `DAILY_LIMIT_EXCEEDED` | would pass 200,000,000 toman for the Tehran day |

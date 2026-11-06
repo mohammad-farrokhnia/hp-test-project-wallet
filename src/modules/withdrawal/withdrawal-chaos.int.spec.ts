@@ -3,7 +3,11 @@ import { randomUUID } from 'node:crypto';
 import { DataSource } from 'typeorm';
 import { Money } from '../../common/money';
 import { AppConfig, loadConfig } from '../../config/app-config';
-import { connectTestDb, describeDb } from '../../database/int-testing';
+import {
+  connectTestDb,
+  describeDb,
+  lockDueWork,
+} from '../../database/int-testing';
 import { TransactionRunner } from '../../database/transaction-runner';
 import { newIdempotencyService } from '../idempotency/testing';
 import { HttpPayoutClient } from '../integrations/payout/http-payout.client';
@@ -103,6 +107,7 @@ describeDb(
   'withdrawal crash and chaos tests (real PostgreSQL, fake payout server)',
   () => {
     let ds: DataSource;
+    let unlockDueWork: (() => Promise<void>) | undefined;
     let runner: TransactionRunner;
     let config: AppConfig;
     let service: WithdrawalService;
@@ -116,6 +121,7 @@ describeDb(
         jest.spyOn(Logger.prototype, level).mockImplementation();
       }
       ds = await connectTestDb();
+      unlockDueWork = await lockDueWork(ds);
       runner = new TransactionRunner(ds, {
         lockTimeoutMs: 10_000,
         statementTimeoutMs: 20_000,
@@ -133,9 +139,10 @@ describeDb(
       );
       server = new FakePayoutServer();
       real = new HttpPayoutClient(await server.start(), 300); // a hung create times out fast
-    });
+    }, 180_000);
 
     afterAll(async () => {
+      await unlockDueWork?.();
       await server?.stop();
       if (ds?.isInitialized) await ds.destroy();
       jest.restoreAllMocks();

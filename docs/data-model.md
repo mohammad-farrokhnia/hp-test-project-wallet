@@ -315,12 +315,14 @@ Every submit to the payout service, opened **before** the call.
 
 - `CHECK` on `user_id` format and currency; `INDEX (user_id, created_at DESC)`.
 
-### `reconciliation_runs` and `reconciliation_mismatches` (bonus)
+### `reconciliation_runs` and `reconciliation_mismatches`
 
 | Table | Columns |
 |---|---|
-| `reconciliation_runs` | id uuid PK · settlement_date date · started_at · finished_at · settlement_rows int · matched int · mismatch_count int · raw_csv text |
-| `reconciliation_mismatches` | id bigint PK · run_id FK · type (`MISSING_IN_LEDGER`, `MISSING_IN_SETTLEMENT`, `AMOUNT_MISMATCH`, `DUPLICATE_IN_SETTLEMENT`) · reference (bank refId) · deposit_id uuid null · our_amount_rial · their_amount_rial · details jsonb |
+| `reconciliation_runs` | id uuid PK · settlement_date date (a Tehran day) · started_at · finished_at (`>= started_at`) · settlement_rows int (every data row of the file, unreadable ones too) · matched int (references present on both sides for the same amount) · mismatch_count int · raw_csv text (the exact file; NUL becomes U+FFFD) · `INDEX (settlement_date, started_at DESC)` |
+| `reconciliation_mismatches` | id bigint PK · run_id FK · type (`MISSING_IN_LEDGER`, `MISSING_IN_SETTLEMENT`, `AMOUNT_MISMATCH`, `DUPLICATE_IN_SETTLEMENT`, `UNREADABLE_ROW`) · reference (bank refId without padding; null for an unreadable row) · deposit_id uuid null (no foreign key) · our_amount_rial · their_amount_rial (both `> 0` when set) · details jsonb. A `CHECK` gives each type the fields it needs: `AMOUNT_MISMATCH` has both amounts and they differ, `MISSING_IN_LEDGER` only theirs, `MISSING_IN_SETTLEMENT` only ours and a deposit id. `INDEX (run_id, id)`. Rows are only inserted, never updated |
+
+Two indexes on `deposits` serve a run: `deposits_credited_at_idx (completed_at) WHERE status = 'SUCCEEDED'` (credited that day) and `deposits_ref_normalized_idx ((ltrim(psp_ref_id, '0')))` (the PSP file pads references to 13 digits).
 
 ## Transfer table
 

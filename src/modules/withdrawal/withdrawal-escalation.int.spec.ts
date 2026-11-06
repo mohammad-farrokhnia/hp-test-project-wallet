@@ -3,7 +3,11 @@ import { randomUUID } from 'node:crypto';
 import { DataSource } from 'typeorm';
 import { Money } from '../../common/money';
 import { AppConfig, loadConfig } from '../../config/app-config';
-import { connectTestDb, describeDb } from '../../database/int-testing';
+import {
+  connectTestDb,
+  describeDb,
+  lockDueWork,
+} from '../../database/int-testing';
 import { TransactionRunner } from '../../database/transaction-runner';
 import { newIdempotencyService } from '../idempotency/testing';
 import { HttpPayoutClient } from '../integrations/payout/http-payout.client';
@@ -72,6 +76,7 @@ class FakePayout implements PayoutClient {
 /** X9: escalation of stuck withdrawals, and the watch for returns after success. */
 describeDb('withdrawal escalation and return watch (real PostgreSQL)', () => {
   let ds: DataSource;
+  let unlockDueWork: (() => Promise<void>) | undefined;
   let runner: TransactionRunner;
   let config: AppConfig;
   let service: WithdrawalService;
@@ -87,6 +92,7 @@ describeDb('withdrawal escalation and return watch (real PostgreSQL)', () => {
       alerts.push(String(m));
     });
     ds = await connectTestDb();
+    unlockDueWork = await lockDueWork(ds);
     runner = new TransactionRunner(ds, {
       lockTimeoutMs: 10_000,
       statementTimeoutMs: 20_000,
@@ -103,9 +109,10 @@ describeDb('withdrawal escalation and return watch (real PostgreSQL)', () => {
       buildPolicies(config.limits),
       config,
     );
-  });
+  }, 180_000);
 
   afterAll(async () => {
+    await unlockDueWork?.();
     if (ds?.isInitialized) await ds.destroy();
     jest.restoreAllMocks();
   });
