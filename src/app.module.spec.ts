@@ -33,6 +33,7 @@ const API_CONTROLLERS = [
   'InvariantsController',
   'PayoutWebhookController',
   'PspCallbackController',
+  'ReconciliationController',
   'TransferController',
   'WalletController',
   'WithdrawalController',

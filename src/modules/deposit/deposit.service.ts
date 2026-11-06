@@ -12,6 +12,7 @@ import {
 import { PSP_CLIENT } from '../integrations/psp';
 import type { CreatePaymentOutcome, PspClient } from '../integrations/psp';
 import {
+  BankReferenced,
   DepositRecord,
   DepositsRepository,
 } from './repositories/deposits.repository';
@@ -113,6 +114,29 @@ export class DepositService {
     return this.runner.run((tx) => this.deposits.findById(tx, id), {
       readOnly: true,
     });
+  }
+
+  /**
+   * @function creditedOn
+   * @description For settlement reconciliation: the deposits credited during one Tehran day, with their bank references. Read only.
+   * @param tx - a read transaction
+   * @param day - `YYYY-MM-DD`
+   */
+  creditedOn(tx: Tx, day: string): Promise<BankReferenced[]> {
+    return this.deposits.creditedOn(tx, day);
+  }
+
+  /**
+   * @function byBankReferences
+   * @description For settlement reconciliation: the deposits, in any status and on any day, that hold one of these bank references (compared without leading zeros). Read only.
+   * @param tx - a read transaction
+   * @param references - references with no leading zeros
+   */
+  byBankReferences(
+    tx: Tx,
+    references: readonly string[],
+  ): Promise<BankReferenced[]> {
+    return this.deposits.findByBankReferences(tx, references);
   }
 
   /** Transaction 1: the claim, and the deposit it protects. */

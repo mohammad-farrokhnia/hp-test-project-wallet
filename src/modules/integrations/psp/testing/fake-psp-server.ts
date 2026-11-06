@@ -7,6 +7,7 @@ import {
 import { randomBytes } from 'node:crypto';
 import { AddressInfo, Socket } from 'node:net';
 import type { PspStatus } from '../psp.port';
+import { SETTLEMENT_HEADER } from '../settlement-csv';
 
 /**
  * How the fake answers one create (POST /psp/payments):
@@ -27,6 +28,18 @@ export interface FakePayment {
   refId: string | null;
 }
 
+/**
+ * How the fake answers `GET /psp/settlement`:
+ * - `ok`: the file registered for the day with `setSettlement`, or a header-only file;
+ * - `503`: 503;
+ * - `html`: 200 with an HTML page (a proxy's error page);
+ * - `json`: 200 with a JSON error object;
+ * - `empty`: 200 with nothing;
+ * - `reset`: resets the connection.
+ */
+export type SettlementFault =
+  'ok' | '503' | 'html' | 'json' | 'empty' | 'reset';
+
 export interface PspScript {
   onCreate(attempt: number): PspCreateFault;
   verify503(token: string, attempt: number): boolean;
@@ -35,11 +48,14 @@ export interface PspScript {
 /**
  * @class FakePspServer
  * @description A stateful PSP for deposit tests, behaving as probed: unique random tokens, unsigned, no `orderId` de-duplication,
- * verify answers 100 once then 101 with the same `refId` and `-51` for anything not paid, and a 503 verify is not applied.
+ * verify answers 100 once then 101 with the same `refId` (a 10-digit bank reference, like the PSP's) and `-51` for anything not paid, and a 503 verify is not applied.
  * `pay` stands in for the payer on the payment page.
  */
 export class FakePspServer {
   readonly payments = new Map<string, FakePayment>();
+  readonly settlementFiles = new Map<string, string>();
+  readonly settlementDays: string[] = [];
+  settlementFault: SettlementFault = 'ok';
   creates = 0;
   private readonly verifies = new Map<string, number>();
   private server?: Server;
@@ -75,12 +91,20 @@ export class FakePspServer {
     return this.verifies.get(token) ?? 0;
   }
 
+  /** The file `GET /psp/settlement?date=day` will answer with. */
+  setSettlement(day: string, csv: string): void {
+    this.settlementFiles.set(day, csv);
+  }
+
   /** The payer completes the payment: `INIT → PAID`, with a bank reference. */
   pay(token: string): void {
     const p = this.payments.get(token);
     if (!p) throw new Error(`no such payment ${token}`);
     p.status = 'PAID';
-    p.refId = `REF${randomBytes(8).toString('hex')}`;
+    p.refId = (
+      (BigInt(`0x${randomBytes(8).toString('hex')}`) % 9_000_000_000n) +
+      1_000_000_000n
+    ).toString();
   }
 
   private route(req: IncomingMessage, res: ServerResponse): void {
@@ -88,6 +112,9 @@ export class FakePspServer {
     req.on('data', (c: Buffer) => (raw += c.toString()));
     req.on('end', () => {
       const url = req.url ?? '';
+      if (req.method === 'GET' && url.startsWith('/psp/settlement')) {
+        return this.settlement(url, req, res);
+      }
       if (req.method === 'POST' && url === '/psp/payments') {
         return this.create(
           JSON.parse(raw) as Record<string, unknown>,
@@ -103,6 +130,34 @@ export class FakePspServer {
       if (req.method === 'GET' && m) return this.get(m[1], res);
       json(res, 404, { code: -9, message: 'not found' });
     });
+  }
+
+  private settlement(
+    url: string,
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): void {
+    const day = new URL(url, 'http://fake').searchParams.get('date') ?? '';
+    this.settlementDays.push(day);
+    switch (this.settlementFault) {
+      case 'reset':
+        return void req.socket.destroy();
+      case '503':
+        return json(res, 503, { code: -1, message: 'down' });
+      case 'html':
+        res.writeHead(200, { 'content-type': 'text/html' });
+        return void res.end('<html><body>502 Bad Gateway</body></html>');
+      case 'json':
+        return json(res, 200, { code: -404, message: 'not found' });
+      case 'empty':
+        res.writeHead(200, { 'content-type': 'text/csv; charset=utf-8' });
+        return void res.end('');
+      case 'ok':
+        res.writeHead(200, { 'content-type': 'text/csv; charset=utf-8' });
+        return void res.end(
+          this.settlementFiles.get(day) ?? SETTLEMENT_HEADER.join(',') + '\r\n',
+        );
+    }
   }
 
   private create(

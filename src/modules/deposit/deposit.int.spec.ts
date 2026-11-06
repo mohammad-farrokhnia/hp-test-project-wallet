@@ -322,6 +322,7 @@ describeDb('POST /deposits and GET /deposits/:id (real PostgreSQL)', () => {
       createPayment: () => Promise.reject(new Error('process died')),
       getPayment: () => Promise.reject(new Error('not used')),
       verify: () => Promise.reject(new Error('not used')),
+      getSettlement: () => Promise.reject(new Error('not used')),
     };
     const config = () => loadConfig({ ...process.env });
     const runner = () =>

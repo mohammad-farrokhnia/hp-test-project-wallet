@@ -43,6 +43,11 @@ export type VerifyOutcome =
   | { readonly kind: 'NOT_FOUND' }
   | { readonly kind: 'UNAVAILABLE'; readonly reason: string };
 
+/** The day's settlement file: its text, or why there is none. */
+export type SettlementOutcome =
+  | { readonly kind: 'FOUND'; readonly csv: string }
+  | { readonly kind: 'UNAVAILABLE'; readonly reason: string };
+
 /**
  * The payment gateway as the deposit module sees it: outcomes, never HTTP codes.
  * The adapter is the only code that knows URLs, status codes and quirks.
@@ -68,4 +73,10 @@ export interface PspClient {
    * `NOT_FOUND` (-9) · `UNAVAILABLE` (503 / -1, timeout: the 503 was not applied, retry).
    */
   verify(token: string): Promise<VerifyOutcome>;
+  /**
+   * The settlement file the PSP publishes for one Tehran day: CSV text of the payments it verified that day.
+   * `FOUND` (200 with a body) · `UNAVAILABLE` (anything else, timeout, an empty or JSON body: no file).
+   * @param day - the Tehran calendar day, `YYYY-MM-DD`
+   */
+  getSettlement(day: string): Promise<SettlementOutcome>;
 }

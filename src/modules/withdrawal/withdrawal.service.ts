@@ -15,14 +15,17 @@ import type {
   WithdrawalPolicies,
   WithdrawalQuote,
 } from './domain/withdrawal-policy';
+import { toWithdrawalView } from './dto/withdrawal.mapper';
 import { DailyLimitRepository } from './repositories/daily-limit.repository';
 import {
+  CancelRow,
   WithdrawalRecord,
   WithdrawalsRepository,
 } from './repositories/withdrawals.repository';
 
 export const WITHDRAWAL_POLICIES = Symbol('WITHDRAWAL_POLICIES');
 export const WITHDRAWALS_SCOPE = 'POST /withdrawals';
+export const CANCEL_SCOPE = 'POST /withdrawals/:id/cancel';
 
 export interface RequestWithdrawal {
   readonly userId: string;
@@ -116,6 +119,84 @@ export class WithdrawalService {
         },
         id,
       );
+    });
+  }
+
+  /**
+   * @function cancel
+   * @description `POST /withdrawals/:id/cancel`: a withdrawal can be cancelled only while `PENDING`, before any attempt to pay it.
+   * Once the worker has claimed it (`SUBMITTING`) the provider may already have the transfer, so cancelling would free money that could still be paid:
+   * from then on it is 409 `CANCEL_NOT_ALLOWED` and only the provider's own answer settles or releases it (ADR-3).
+   * One transaction, in lock order (key → withdrawal row → accounts → daily usage):
+   * 1. claim the Idempotency-Key (a repeat replays the stored answer);
+   * 2. lock the withdrawal row and wait for it: a submit in progress finishes first and the cancel then sees `SUBMITTING`;
+   * 3. `PENDING` → `FAILED (CANCELLED)` by compare-and-set, the `WITHDRAWAL_RELEASE` journal (amount + fee back to AVAILABLE), the day's limit given back;
+   * 4. already cancelled → the same 200 (the state asked for is the state it is in); any other state → 409, nothing stored, nothing changed.
+   * A submit job for a cancelled withdrawal finds it `FAILED` and does nothing.
+   * @param id - the withdrawal id
+   * @param key - the Idempotency-Key
+   * @returns the withdrawal as it is now, fresh or replayed
+   * @throws {AppError} `NOT_FOUND`, `CANCEL_NOT_ALLOWED`, `IDEMPOTENCY_KEY_REUSED`, `IDEMPOTENCY_IN_PROGRESS`
+   */
+  async cancel(id: string, key: string): Promise<WithdrawalReply> {
+    return this.runner.run(async (tx) => {
+      const claim = await this.idempotency.claim(tx, {
+        key,
+        scope: CANCEL_SCOPE,
+        body: { withdrawalId: id },
+      });
+      if (claim.kind === 'REPLAY') {
+        return { response: claim.response, replayed: true };
+      }
+      const w = await this.withdrawals.lockForCancel(tx, id);
+      if (!w) throw new AppError('NOT_FOUND', 'Withdrawal not found');
+
+      const already = w.status === 'FAILED' && w.failureReason === 'CANCELLED';
+      if (!already) {
+        if (w.status !== 'PENDING') {
+          throw new AppError(
+            'CANCEL_NOT_ALLOWED',
+            `A ${w.status} withdrawal can no longer be cancelled`,
+          );
+        }
+        if (!(await this.withdrawals.cancelIfPending(tx, id))) {
+          throw new AppError('CANCEL_NOT_ALLOWED');
+        }
+        await this.release(tx, w);
+      }
+      const record = await this.withdrawals.findById(tx, id);
+      if (!record) throw new Error(`withdrawal ${id} vanished`);
+      return this.reply(
+        tx,
+        key,
+        { status: 200, body: toWithdrawalView(record) },
+        id,
+      );
+    });
+  }
+
+  /** The money of a cancelled withdrawal goes back: amount + fee FROZEN → AVAILABLE, and the day's limit share is released. */
+  private async release(tx: Tx, w: CancelRow): Promise<void> {
+    const user = await this.ledger.ensureUserAccounts(
+      tx,
+      w.userId,
+      w.amount.currency,
+    );
+    const total = w.amount.add(w.fee);
+    await this.ledger.post(tx, {
+      kind: 'WITHDRAWAL_RELEASE',
+      refId: w.id,
+      currency: w.amount.currency,
+      description: `Cancelled withdrawal ${w.id}`,
+      lines: [
+        { accountId: user.frozen, amount: total.negate() },
+        { accountId: user.available, amount: total },
+      ],
+    });
+    await this.limits.release(tx, {
+      userId: w.userId,
+      day: w.limitDay,
+      amountRial: w.limitAmountRial,
     });
   }
 

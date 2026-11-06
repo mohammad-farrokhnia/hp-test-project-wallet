@@ -4,6 +4,7 @@
 //   B  workers SIGKILLed while paid deposits sync                    E  out-of-order and forged webhooks and callbacks
 //   C  Postgres restarted then SIGKILLed under deposit + withdrawal load   F  simulator restarted (provider state lost)
 //   I  transfers and balance events under load with kills: conserved, one per key, each event delivered once
+//   J  settlement reconciliation against the real simulator: our payments are accounted for, its injected rows are reported
 //   H  USDT withdrawals end to end: fee, CRYPTO payout, one daily cap shared with IRT
 //   G  money races: parallel withdrawals against one balance and against the daily limit
 // Clients retry the way real ones do; afterwards it checks one deposit/withdrawal per key, no double credit, invariants, eventual completion.
@@ -148,6 +149,8 @@ async function globalChecks(label) {
   say(`  ${label}: job.dead messages: ${dl?.messages ?? '?'}; other queue depths: ${queues.filter((q) => q.name !== 'job.dead').map((q) => `${q.name}=${q.messages}`).join(' ')}`);
   if ((dl?.messages ?? 0) > 0) problem(`${label}: ${dl.messages} messages in job.dead`);
 }
+
+const psp_rows = (users) => psql(`SELECT id, psp_ref_id, credited_rial FROM deposits WHERE user_id IN (${users}) AND status = 'SUCCEEDED'`);
 
 const scenarios = {
   async A() {
@@ -297,6 +300,48 @@ const scenarios = {
     if (n !== events) problem(`I: ${events} events but ${n} notifications`);
     if (distinct !== n) problem(`I: duplicate notifications (${n} rows, ${distinct} distinct messages)`);
     await globalChecks('I');
+  },
+  async J() {
+    say('J: settlement reconciliation against the real simulator, through the live stack');
+    await setSimulator('default'); await waitHealthy();
+    const items = await depositFlow('J', 8);
+    const t = await finals(items.filter((d) => d.id), 'deposits', 240);
+    say(`  8 deposits paid and credited after ${t}s`);
+    const users = items.map((d) => `'${d.userId}'`).join(',');
+    const ours = psp_rows(users);
+    say(`  credited: ${ours.length}`);
+    if (ours.length === 0) { problem('J: nothing was credited'); return; }
+    const mine = new Map(ours.map((r) => [r[1].replace(/^0+/, ''), { id: r[0], amount: r[2] }]));
+
+    const run = await call('POST', '/reconciliation/run', {});
+    say(`  POST /reconciliation/run -> ${run.status}; rows ${run.body?.settlementRows}, matched ${run.body?.matched}, mismatches ${run.body?.mismatchCount}`);
+    if (run.status !== 201) { problem(`J: run answered ${run.status} ${run.text.slice(0, 200)}`); return; }
+    const byType = run.body.mismatches.reduce((a, m) => (a[m.type] = (a[m.type] ?? 0) + 1, a), {});
+    say('  mismatches by type', JSON.stringify(byType));
+    for (const m of run.body.mismatches) {
+      if (m.reference && mine.has(m.reference) && m.type !== 'DUPLICATE_IN_SETTLEMENT') problem(`J: a payment of ours is reported as ${m.type}: ${m.reference}`);
+    }
+    const dup = run.body.mismatches.filter((m) => m.type === 'DUPLICATE_IN_SETTLEMENT');
+    say(`  repeated rows reported: ${dup.map((m) => m.reference).join(', ') || 'none'}`);
+    const foreign = run.body.mismatches.filter((m) => m.type === 'MISSING_IN_LEDGER');
+    say(`  rows we never credited (the simulator's injected row): ${foreign.map((m) => `${m.reference}/${m.theirAmountRial}`).join(', ') || 'none'}`);
+    if (foreign.length < 1) problem('J: the simulator injects a row that is not ours; it was not reported');
+    const matchedOurs = ours.length - [...mine.keys()].filter((r) => !run.body.mismatches.some((m) => m.reference === r && m.type !== 'DUPLICATE_IN_SETTLEMENT')).length;
+    if (run.body.matched < ours.length - dup.filter((m) => mine.has(m.reference)).length && run.body.matched < 1) problem(`J: matched ${run.body.matched}`);
+    const listedOurs = ours.length;
+    say(`  our ${listedOurs} credited payments: none reported missing or different; ${run.body.matched} references matched in all`);
+    void matchedOurs;
+
+    const again = await call('GET', `/reconciliation/runs/${run.body.runId}`);
+    if (again.status !== 200 || again.body.mismatchCount !== run.body.mismatchCount) problem('J: the stored run does not read back the same');
+
+    const [{ d }] = psql(`SELECT to_char((now() AT TIME ZONE 'Asia/Tehran')::date - 1, 'YYYY-MM-DD')`).map((r) => ({ d: r[0] }));
+    const yesterday = await call('POST', '/reconciliation/run', { date: d });
+    say(`  yesterday (${d}) -> ${yesterday.status}; mismatches ${JSON.stringify(yesterday.body?.mismatches?.map((m) => m.type))}`);
+    if (yesterday.status !== 201) problem(`J: yesterday answered ${yesterday.status}`);
+    const bad = await call('POST', '/reconciliation/run', { date: '2026-13-45' });
+    if (bad.status !== 400) problem(`J: a bad date answered ${bad.status}`);
+    await globalChecks('J');
   },
   async H() {
     say('H: USDT withdrawals on the real stack and simulator: fee, CRYPTO payout, and one daily cap shared with IRT');

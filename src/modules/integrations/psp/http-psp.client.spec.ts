@@ -155,4 +155,52 @@ describe('HttpPspClient against a scripted PSP', () => {
       });
     });
   });
+
+  describe('getSettlement (PSP-12)', () => {
+    beforeEach(() => {
+      psp.settlementFault = 'ok';
+      psp.settlementFiles.clear();
+      psp.settlementDays.length = 0;
+    });
+
+    it('asks for the Tehran day it was given and returns the file as text', async () => {
+      psp.setSettlement('2026-11-05', 'h1,h2\r\n1,2\r\n');
+      await expect(client.getSettlement('2026-11-05')).resolves.toEqual({
+        kind: 'FOUND',
+        csv: 'h1,h2\r\n1,2\r\n',
+      });
+      expect(psp.settlementDays).toEqual(['2026-11-05']);
+    });
+
+    it('a day with nothing registered is the empty file, still FOUND', async () => {
+      const o = await client.getSettlement('2026-01-01');
+      expect(o.kind).toBe('FOUND');
+    });
+
+    it.each(['503', 'json', 'empty'] as const)(
+      'a PSP that answers %s has no file → UNAVAILABLE',
+      async (fault) => {
+        psp.settlementFault = fault;
+        await expect(client.getSettlement('2026-11-05')).resolves.toMatchObject(
+          {
+            kind: 'UNAVAILABLE',
+          },
+        );
+      },
+    );
+
+    it('a proxy error page served with a 200 is text, so it is FOUND here: the settlement parser refuses it', async () => {
+      psp.settlementFault = 'html';
+      await expect(client.getSettlement('2026-11-05')).resolves.toMatchObject({
+        kind: 'FOUND',
+      });
+    });
+
+    it('a PSP that is down → UNAVAILABLE', async () => {
+      const down = new HttpPspClient('http://127.0.0.1:1', 300);
+      await expect(down.getSettlement('2026-11-05')).resolves.toMatchObject({
+        kind: 'UNAVAILABLE',
+      });
+    });
+  });
 });

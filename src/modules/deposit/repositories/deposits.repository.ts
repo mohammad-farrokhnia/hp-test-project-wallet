@@ -28,6 +28,18 @@ export interface CallbackTarget {
   readonly failureReason: DepositFailureReason | null;
 }
 
+/** A deposit as the settlement reconciliation sees it: only what it compares. */
+export interface BankReferenced {
+  readonly id: string;
+  /** The PSP's bank reference, as stored. */
+  readonly bankReference: string;
+  /** The same without leading zeros: the form the PSP's file is compared in. */
+  readonly reference: string;
+  readonly status: DepositStatus;
+  readonly creditedRial: bigint | null;
+  readonly completedAt: Date | null;
+}
+
 export interface NewDeposit {
   readonly id: string;
   readonly userId: string;
@@ -171,6 +183,42 @@ export class DepositsRepository {
   }
 
   /**
+   * @function creditedOn
+   * @description The deposits credited during one Tehran calendar day (by the database clock): `SUCCEEDED`, with the bank reference they were verified under.
+   * @param day - `YYYY-MM-DD`
+   */
+  async creditedOn(tx: Tx, day: string): Promise<BankReferenced[]> {
+    const { rows } = await sql<BankReferencedRow>`
+      SELECT id, psp_ref_id, status, credited_rial, completed_at
+        FROM deposits
+       WHERE status = 'SUCCEEDED' AND psp_ref_id IS NOT NULL
+         AND completed_at >= (${day}::date)::timestamp AT TIME ZONE 'Asia/Tehran'
+         AND completed_at <  (${day}::date + 1)::timestamp AT TIME ZONE 'Asia/Tehran'
+       ORDER BY completed_at, id`.execute(db(tx));
+    return rows.map(toBankReferenced);
+  }
+
+  /**
+   * @function findByBankReferences
+   * @description The deposits (any status, any day) holding one of these bank references, compared without leading zeros.
+   * @param references - references with no leading zeros
+   */
+  async findByBankReferences(
+    tx: Tx,
+    references: readonly string[],
+  ): Promise<BankReferenced[]> {
+    if (references.length === 0) return [];
+    const { rows } = await sql<BankReferencedRow>`
+      SELECT id, psp_ref_id, status, credited_rial, completed_at
+        FROM deposits
+       WHERE psp_ref_id IS NOT NULL
+         AND ltrim(psp_ref_id, '0') = ANY(${[...references]}::text[])`.execute(
+      db(tx),
+    );
+    return rows.map(toBankReferenced);
+  }
+
+  /**
    * @function markPending
    * @description `CREATED → PENDING` when the PSP issued a payment: stores the token and link, `psp_status = INIT`, and schedules the first status check.
    * @returns false when the deposit was no longer `CREATED`
@@ -222,4 +270,23 @@ export class DepositsRepository {
       .executeTakeFirst();
     return res.numUpdatedRows === 1n;
   }
+}
+
+interface BankReferencedRow {
+  id: string;
+  psp_ref_id: string;
+  status: string;
+  credited_rial: string | null;
+  completed_at: Date | null;
+}
+
+function toBankReferenced(r: BankReferencedRow): BankReferenced {
+  return {
+    id: r.id,
+    bankReference: r.psp_ref_id,
+    reference: r.psp_ref_id.replace(/^0+/, ''),
+    status: r.status as DepositStatus,
+    creditedRial: r.credited_rial === null ? null : BigInt(r.credited_rial),
+    completedAt: r.completed_at,
+  };
 }

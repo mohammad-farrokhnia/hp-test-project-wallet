@@ -62,6 +62,18 @@ export interface WithdrawalRecord {
   readonly updatedAt: Date;
 }
 
+/** What a cancel decides on, read under the withdrawal's row lock. */
+export interface CancelRow {
+  readonly id: string;
+  readonly userId: string;
+  readonly status: WithdrawalStatus;
+  readonly failureReason: string | null;
+  readonly amount: Money;
+  readonly fee: Money;
+  readonly limitDay: string;
+  readonly limitAmountRial: bigint;
+}
+
 /**
  * @class WithdrawalsRepository
  * @description Explicit SQL over `withdrawals`. Owned by the withdrawal module.
@@ -87,6 +99,63 @@ export class WithdrawalsRepository {
         next_check_at: sql<Date>`now() + make_interval(secs => ${w.nextCheckInSeconds})`,
       })
       .execute();
+  }
+
+  /**
+   * @function lockForCancel
+   * @description Locks the withdrawal and waits for the lock (unlike the submit job's `SKIP LOCKED`): a cancel that meets a submit in progress
+   * must see its outcome, not step around it.
+   * @returns what a cancel needs, or `null` when unknown
+   */
+  async lockForCancel(tx: Tx, id: string): Promise<CancelRow | null> {
+    const r = await db(tx)
+      .selectFrom('withdrawals')
+      .select([
+        'id',
+        'user_id',
+        'status',
+        'failure_reason',
+        'currency',
+        'amount_minor',
+        'fee_minor',
+        'limit_day',
+        'limit_amount_rial',
+      ])
+      .where('id', '=', id)
+      .forUpdate()
+      .executeTakeFirst();
+    if (!r) return null;
+    const currency = r.currency as CurrencyCode;
+    return {
+      id: r.id,
+      userId: r.user_id,
+      status: r.status as WithdrawalStatus,
+      failureReason: r.failure_reason,
+      amount: Money.of(currency, BigInt(r.amount_minor)),
+      fee: Money.of(currency, BigInt(r.fee_minor)),
+      limitDay: r.limit_day,
+      limitAmountRial: BigInt(r.limit_amount_rial),
+    };
+  }
+
+  /**
+   * @function cancelIfPending
+   * @description `PENDING → FAILED (CANCELLED)`, compare-and-set on the status. A cancelled withdrawal is final: no further check is due.
+   * @returns false when it was no longer `PENDING`
+   */
+  async cancelIfPending(tx: Tx, id: string): Promise<boolean> {
+    const res = await db(tx)
+      .updateTable('withdrawals')
+      .set({
+        status: 'FAILED',
+        failure_reason: 'CANCELLED',
+        completed_at: sql<Date>`now()`,
+        next_check_at: null,
+      })
+      .where('id', '=', id)
+      .where('status', '=', 'PENDING')
+      .executeTakeFirst();
+    return res.numUpdatedRows === 1n;
   }
 
   /** @returns the withdrawal, or `null` */

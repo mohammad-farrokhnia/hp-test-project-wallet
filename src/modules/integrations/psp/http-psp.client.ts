@@ -4,12 +4,14 @@ import { callJson, describeFailure, HttpAnswer } from '../http/json-call';
 import {
   classifyCreate,
   classifyLookup,
+  classifySettlement,
   classifyVerify,
 } from './psp-classifier';
 import {
   CreatePaymentOutcome,
   PaymentLookup,
   PspClient,
+  SettlementOutcome,
   VerifyOutcome,
 } from './psp.port';
 
@@ -55,6 +57,16 @@ export class HttpPspClient implements PspClient {
       token,
     });
     return 'reason' in answer ? answer : classifyVerify(answer);
+  }
+
+  async getSettlement(day: string): Promise<SettlementOutcome> {
+    const answer = await this.send(
+      'settlement',
+      day,
+      'GET',
+      `/psp/settlement?date=${encodeURIComponent(day)}`,
+    );
+    return 'reason' in answer ? answer : classifySettlement(answer);
   }
 
   private async send(

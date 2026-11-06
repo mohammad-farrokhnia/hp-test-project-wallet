@@ -4,6 +4,7 @@ import {
   CreatePaymentOutcome,
   PaymentLookup,
   PspStatus,
+  SettlementOutcome,
   VerifyOutcome,
 } from './psp.port';
 
@@ -143,4 +144,21 @@ export function classifyVerify(answer: HttpAnswer): VerifyOutcome {
     };
   }
   return { kind: 'UNAVAILABLE', reason: reasonFor(answer) };
+}
+
+/**
+ * @function classifySettlement
+ * @description `GET /psp/settlement`: a 200 whose body is text → `FOUND`. The file is CSV, so a JSON body (an error object, a parsed value)
+ * or an empty one means this is not the file; anything but 200 → `UNAVAILABLE`. What the text contains is for the settlement parser to judge.
+ * @param answer - what the PSP answered
+ * @returns the outcome
+ */
+export function classifySettlement(answer: HttpAnswer): SettlementOutcome {
+  if (answer.status !== 200) {
+    return { kind: 'UNAVAILABLE', reason: reasonFor(answer) };
+  }
+  if (typeof answer.body !== 'string' || answer.body.trim() === '') {
+    return { kind: 'UNAVAILABLE', reason: 'not a text body' };
+  }
+  return { kind: 'FOUND', csv: answer.body };
 }

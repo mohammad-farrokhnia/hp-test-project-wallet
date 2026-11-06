@@ -54,8 +54,8 @@ class ProbeController {
   }
 }
 
-@Controller('reconciliation')
-@IdempotencyExempt('reconciliation changes no money')
+@Controller('probe/exempt')
+@IdempotencyExempt('changes no money')
 class ExemptController {
   @Post('run')
   run() {
@@ -130,7 +130,7 @@ describe('financial POSTs over HTTP', () => {
     expect(res.body).toEqual({ code: 'X' });
   });
 
-  it.each(['/probe/webhooks/payout', '/reconciliation/run'])(
+  it.each(['/probe/webhooks/payout', '/probe/exempt/run'])(
     'lets the exempt %s through without the header',
     async (path) => {
       const res = await post(path);

@@ -10,6 +10,7 @@ import type {
   CreatePaymentOutcome,
   PaymentLookup,
   PspClient,
+  SettlementOutcome,
   VerifyOutcome,
 } from '../../integrations/psp';
 import { HttpPspClient } from '../../integrations/psp/http-psp.client';
@@ -42,6 +43,9 @@ class SpyPsp implements PspClient {
     return this.lookup
       ? Promise.resolve(this.lookup())
       : this.inner.getPayment(token);
+  }
+  getSettlement(day: string): Promise<SettlementOutcome> {
+    return this.inner.getSettlement(day);
   }
   verify(token: string): Promise<VerifyOutcome> {
     this.verifies++;

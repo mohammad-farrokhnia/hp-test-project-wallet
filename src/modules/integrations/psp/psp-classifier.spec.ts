@@ -2,6 +2,7 @@ import { Money } from '../../../common/money';
 import {
   classifyCreate,
   classifyLookup,
+  classifySettlement,
   classifyVerify,
 } from './psp-classifier';
 
@@ -201,5 +202,32 @@ describe('classifyLookup', () => {
     ['a non-JSON 200', answer(200, 'hello')],
   ])('%s → UNAVAILABLE', (_name, input) => {
     expect(classifyLookup(input).kind).toBe('UNAVAILABLE');
+  });
+});
+
+describe('classifySettlement (PSP-12)', () => {
+  const csv = 'a,b,c\r\n1,2,3\r\n';
+
+  it('a 200 with text is the file', () => {
+    expect(classifySettlement(answer(200, csv))).toEqual({
+      kind: 'FOUND',
+      csv,
+    });
+  });
+
+  it.each([
+    ['a 503', answer(503, { code: -1 }), 'HTTP_503/code_-1'],
+    ['a 404', answer(404, { code: -404 }), 'HTTP_404/code_-404'],
+    ['a 500 with a page', answer(500, '<html>oops</html>'), 'HTTP_500'],
+    [
+      'a 200 with a JSON error object',
+      answer(200, { code: -404 }),
+      'not a text body',
+    ],
+    ['a 200 with a JSON number', answer(200, 5), 'not a text body'],
+    ['a 200 with nothing', answer(200, null), 'not a text body'],
+    ['a 200 with blank text', answer(200, '  \r\n'), 'not a text body'],
+  ])('%s is UNAVAILABLE: there is no file', (_name, input, reason) => {
+    expect(classifySettlement(input)).toEqual({ kind: 'UNAVAILABLE', reason });
   });
 });

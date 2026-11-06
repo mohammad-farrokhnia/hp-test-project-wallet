@@ -509,6 +509,103 @@ describeDb(
       });
     });
 
+    describe('POST /withdrawals/:id/cancel (B6)', () => {
+      const cancel = (id: string, key: string | null = newKey()) => {
+        const r = request(app.getHttpServer()).post(
+          `/withdrawals/${id}/cancel`,
+        );
+        if (key !== null) r.set('Idempotency-Key', key);
+        return r.send();
+      };
+      const open = async () => {
+        const userId = newUser();
+        await fund(userId, toman(500_000n));
+        const res = await withdraw(irt(userId, '150000'));
+        return {
+          userId,
+          id: (res.body as { withdrawalId: string }).withdrawalId,
+        };
+      };
+
+      it('cancels a PENDING withdrawal: 200 with the withdrawal as FAILED (CANCELLED), the funds released', async () => {
+        const { id, userId } = await open();
+        expect((await balances(userId)).FROZEN).toBe('1500000');
+
+        const res = await cancel(id);
+
+        expect(res.status).toBe(200);
+        expect(res.body).toMatchObject({
+          withdrawalId: id,
+          status: 'FAILED',
+          failureReason: 'CANCELLED',
+          userId,
+        });
+        expect(await balances(userId)).toMatchObject({
+          AVAILABLE: '5000000',
+          FROZEN: '0',
+        });
+        expect(await usage(userId)).toBe('0');
+        const got = await request(app.getHttpServer()).get(
+          `/withdrawals/${id}`,
+        );
+        expect(got.body).toMatchObject({
+          status: 'FAILED',
+          failureReason: 'CANCELLED',
+        });
+      });
+
+      it('a repeat with the same key is replayed; with a new key it is the same 200; the funds come back once', async () => {
+        const { id, userId } = await open();
+        const key = newKey();
+        const first = await cancel(id, key);
+        const replay = await cancel(id, key);
+        const fresh = await cancel(id);
+        expect(replay.status).toBe(200);
+        expect(replay.headers['idempotent-replayed']).toBe('true');
+        expect(replay.body).toEqual(first.body);
+        expect(fresh.status).toBe(200);
+        expect(fresh.headers['idempotent-replayed']).toBeUndefined();
+        expect((await balances(userId)).AVAILABLE).toBe('5000000');
+      });
+
+      it.each(['SUBMITTING', 'PROCESSING'])(
+        'a %s withdrawal answers 409 CANCEL_NOT_ALLOWED and keeps its money frozen',
+        async (status) => {
+          const { id, userId } = await open();
+          await ds.query(
+            `UPDATE withdrawals SET status = $2, submit_attempts = 1, submitted_at = now() WHERE id = $1`,
+            [id, status],
+          );
+          const res = await cancel(id);
+          expect(res.status).toBe(409);
+          expect(res.body).toMatchObject({ code: 'CANCEL_NOT_ALLOWED' });
+          expect((await balances(userId)).FROZEN).toBe('1500000');
+          expect(
+            await count(
+              `SELECT count(*)::text AS n FROM journals WHERE ref_id = $1 AND kind = 'WITHDRAWAL_RELEASE'`,
+              id,
+            ),
+          ).toBe('0');
+        },
+      );
+
+      it('needs an Idempotency-Key', async () => {
+        const { id } = await open();
+        const res = await cancel(id, null);
+        expect(res.status).toBe(400);
+        expect(res.body).toMatchObject({ code: 'IDEMPOTENCY_KEY_REQUIRED' });
+      });
+
+      it.each([
+        ['an unknown id', () => randomUUID()],
+        ['an id that is not a uuid', () => 'not-a-withdrawal'],
+      ])('%s → 404', async (_c, make) => {
+        const res = await cancel(make());
+        expect(res.status).toBe(404);
+        expect(res.body).toMatchObject({ code: 'NOT_FOUND' });
+      });
+    });
+
     describe('GET /withdrawals/:id', () => {
       it('returns the withdrawal in API units with the destination masked', async () => {
         const userId = newUser();

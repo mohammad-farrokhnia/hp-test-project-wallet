@@ -306,7 +306,7 @@ describeDb('withdrawal escalation and return watch (real PostgreSQL)', () => {
     };
     const makeDue = (id: string) =>
       ds.query(
-        `UPDATE withdrawals SET next_check_at = now() - interval '1 second' WHERE id = $1`,
+        `UPDATE withdrawals SET next_check_at = now() - interval '10 years' WHERE id = $1`,
         [id],
       );
 
@@ -338,7 +338,7 @@ describeDb('withdrawal escalation and return watch (real PostgreSQL)', () => {
       const { id } = await processing();
       await sync(id, 'SUCCEEDED');
       await ds.query(
-        `UPDATE withdrawals SET completed_at = now() - interval '25 hours', next_check_at = now() - interval '1 second' WHERE id = $1`,
+        `UPDATE withdrawals SET completed_at = now() - interval '25 hours', next_check_at = now() - interval '10 years' WHERE id = $1`,
         [id],
       );
       expect(await sweepFor(id)).toEqual(['job.withdrawal.sync']);

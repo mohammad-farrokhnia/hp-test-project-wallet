@@ -169,6 +169,28 @@ export interface Postings {
   user_id: string | null;
 }
 
+export interface ReconciliationMismatches {
+  deposit_id: string | null;
+  details: Generated<Json>;
+  id: Generated<Int8>;
+  our_amount_rial: Int8 | null;
+  reference: string | null;
+  run_id: string;
+  their_amount_rial: Int8 | null;
+  type: string;
+}
+
+export interface ReconciliationRuns {
+  finished_at: Timestamp;
+  id: string;
+  matched: number;
+  mismatch_count: number;
+  raw_csv: string;
+  settlement_date: string;
+  settlement_rows: number;
+  started_at: Timestamp;
+}
+
 export interface Transfers {
   amount_minor: Int8;
   created_at: Generated<Timestamp>;
@@ -228,6 +250,8 @@ export interface DB {
   outbox: Outbox;
   payout_attempts: PayoutAttempts;
   postings: Postings;
+  reconciliation_mismatches: ReconciliationMismatches;
+  reconciliation_runs: ReconciliationRuns;
   transfers: Transfers;
   withdrawal_daily_usage: WithdrawalDailyUsage;
   withdrawals: Withdrawals;

@@ -10,7 +10,7 @@ import { WithdrawalService } from './withdrawal.service';
 
 /**
  * @class WithdrawalController
- * @description `POST /withdrawals` and `GET /withdrawals/:id`.
+ * @description `POST /withdrawals`, `GET /withdrawals/:id` and `POST /withdrawals/:id/cancel`.
  * Maps HTTP to the use case and back; the rules live in `WithdrawalService`.
  */
 @Controller('withdrawals')
@@ -32,6 +32,18 @@ export class WithdrawalController {
       },
       key,
     );
+    return sendIdempotent(res, response, replayed);
+  }
+
+  /** Cancels a withdrawal that is still `PENDING`; later it is 409. Unknown and malformed ids alike are 404. */
+  @FinancialPost(':id/cancel')
+  async cancel(
+    @Param('id') id: string,
+    @IdempotencyKey() key: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<unknown> {
+    if (!isUuid(id)) throw new AppError('NOT_FOUND', 'Withdrawal not found');
+    const { response, replayed } = await this.withdrawals.cancel(id, key);
     return sendIdempotent(res, response, replayed);
   }
 

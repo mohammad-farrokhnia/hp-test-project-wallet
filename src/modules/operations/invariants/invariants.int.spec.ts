@@ -45,9 +45,12 @@ describeDb('InvariantsService (real PostgreSQL)', () => {
     }
   }
 
-  /** A fresh user credited `rial` through the ledger, the normal way. */
-  async function fundedUser(tx: Tx, rial = 100n) {
-    const userId = `l4_${randomUUID().slice(0, 12)}`;
+  /**
+   * A fresh user credited `rial` through the ledger, the normal way.
+   * `idPrefix` matters when the report is truncated: violations are sorted by user id and cut at the limit, so a test that must see its own row uses a prefix that sorts before every user other suites left committed.
+   */
+  async function fundedUser(tx: Tx, rial = 100n, idPrefix = 'l4_') {
+    const userId = `${idPrefix}${randomUUID().slice(0, 12)}`;
     const ids = await ledger.ensureUserAccounts(tx, userId, 'IRR');
     const ops = await ledger.systemAccountId(tx, 'OPS_ADJUSTMENTS', 'IRR');
     await ledger.post(tx, {
@@ -227,7 +230,7 @@ describeDb('InvariantsService (real PostgreSQL)', () => {
 
   it('FROZEN_EQUALS_OPEN_WITHDRAWALS: reports frozen money no open withdrawal explains', async () => {
     await sandbox(async (tx) => {
-      const { userId, ids } = await fundedUser(tx, 100n);
+      const { userId, ids } = await fundedUser(tx, 100n, '00_');
       await freeze(tx, ids, 40n);
 
       const report = await service().checkIn(tx);

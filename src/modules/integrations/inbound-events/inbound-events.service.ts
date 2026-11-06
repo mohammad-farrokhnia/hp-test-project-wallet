@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { sql } from 'kysely';
+import { storable } from '../../../common/strings';
 import { db } from '../../../database/kysely';
 import { Tx } from '../../../database/transaction-runner';
 
@@ -19,18 +20,6 @@ export interface InboundEvent {
   readonly headers: Readonly<Record<string, unknown>>;
   readonly rawBody: string;
   readonly outcome: InboundOutcome;
-}
-
-/** The character PostgreSQL `text` cannot store. */
-const NUL = '\u0000';
-
-/**
- * @function storable
- * @description Replaces NUL characters with U+FFFD: PostgreSQL refuses them in `text`, and a delivery that carries one must still be recorded, not turn into a 500.
- * Signatures are checked on the raw bytes before this, so nothing that is verified is affected.
- */
-function storable(text: string): string {
-  return text.split(NUL).join('\uFFFD');
 }
 
 /**

@@ -709,7 +709,7 @@ describeDb(
       const pending = await withdrawal('PENDING');
       const processing = await withdrawal('PROCESSING');
       await ds.query(
-        `UPDATE withdrawals SET next_check_at = now() - interval '1 second' WHERE id IN ($1, $2)`,
+        `UPDATE withdrawals SET next_check_at = now() - interval '10 years' WHERE id IN ($1, $2)`,
         [pending.id, processing.id],
       );
       const jobs = await runner.run((tx) =>
