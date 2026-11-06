@@ -47,7 +47,7 @@ Nothing points back: the ledger knows nothing about withdrawals, and the schedul
 | Role | Loads | Replicas |
 |---|---|---|
 | `api` | all controllers, guards, filters; publishes nothing directly (writes outbox rows) | 2, behind nginx `app:3000` |
-| `worker` | outbox relay, job consumers, sweeper, cleanup, invariant checker; no controllers except `/health` on an internal port | 2 |
+| `worker` | outbox relay, job consumers, sweeper, retention jobs; no controllers except `/health` and `/ready` | 2 |
 | `all` | both (local development) | 1 |
 
 ## Foundation
@@ -170,7 +170,7 @@ What gets stored: 2xx responses and state-dependent 422s (`INSUFFICIENT_FUNDS`, 
 2. `ledger.ensureUserAccounts` + `lockUserAccounts`.
 3. `available < amount + fee` → stored 422 `INSUFFICIENT_FUNDS`.
 4. `DailyLimitRepository.reserve(tx, userId, tehranDay, limitAmount)` (creates and locks the row) → over the cap: stored 422 `DAILY_LIMIT_EXCEEDED`.
-5. Insert the withdrawal (`PENDING`, `next_check_at = now + WITHDRAWAL_SAFETY_NET_SECONDS` (30 s) as a safety net), `ledger.post(WITHDRAWAL_FREEZE)` (amount + fee, AVAILABLE → FROZEN), `outbox.add(job.withdrawal.submit)`. *(The transition row waits for a `state_transitions` migration, which no task has created yet.)*
+5. Insert the withdrawal (`PENDING`, `next_check_at = now + WITHDRAWAL_SAFETY_NET_SECONDS` (30 s) as a safety net), `ledger.post(WITHDRAWAL_FREEZE)` (amount + fee, AVAILABLE → FROZEN), `outbox.add(job.withdrawal.submit)`.
 6. `idempotency.complete(201 {withdrawalId, status: "PENDING"})`, then commit.
 
 **`get(id)`:** `200 {withdrawalId, status, userId, currency, amount, fee, destination (masked: first and last 4 characters), failureReason, returnedAt, returnReason, needsReview, createdAt, updatedAt}`; unknown or malformed id → 404 `NOT_FOUND`.
@@ -187,7 +187,7 @@ What gets stored: 2xx responses and state-dependent 422s (`INSUFFICIENT_FUNDS`, 
    - `AMBIGUOUS` → stays `SUBMITTING`, `next_check_at` by backoff.
 
 **`WithdrawalSyncHandler`** (`domain/withdrawal-state-machine.ts` holds the W5–W11 decisions as a pure function; the handler applies them with compare-and-set under the row lock; journals: SETTLE = FROZEN −(x+fee), PAYOUT_CLEARING +x, FEE_REVENUE +fee; RELEASE = FROZEN → AVAILABLE; RETURN through `ledger.creditUser` from PAYOUT_CLEARING, so it pays DEBT first like every credit). Return watch: `WITHDRAWAL_RETURN_WATCH_HOURS` (24); past it, a sync without a webhook stops checking (W15). `WithdrawalDueWork` is the sweeper's source (bump first; submit while PENDING, else sync):
-1. Read the row. A non-final status, `SUCCEEDED` within the return window, or any status when a signed webhook triggered the job (that is how W12 is found) needs a GET; anything else acks and stops.
+1. Read the row. A non-final status, `SUCCEEDED` within the return window, or any status when a signed webhook triggered the job needs a GET; anything else acks and stops.
 2. `PayoutClient.getTransfer`:
    - a snapshot goes to `WithdrawalOutcomeService.apply`;
    - `NOT_FOUND` while `SUBMITTING` with no in-flight attempt → enqueue submit with the same requestId;
@@ -276,7 +276,7 @@ Next, `PspClient.createPayment(amountRial, orderId = depositId, callbackUrl)`. T
 | Deposit watchdog, abandoned create (`DepositWatchdog`) | CREATED older than `DEPOSIT_ABANDON_AFTER_MINUTES` (10); partial index `deposits_created_idx` | `FAILED (CREATE_ABANDONED)`; the key is left, and a retry with it answers from the failed deposit |
 | Deposit watchdog, unverified (`DepositWatchdog`) | PENDING, first seen paid more than `DEPOSIT_UNVERIFIED_ALERT_SECONDS` (120) ago, not yet flagged; partial index `deposits_unverified_idx` | sets `needs_review = UNVERIFIED_TOO_LONG`, logs an `ALERT`; queues nothing, fails nothing, leaves `next_check_at` so a late verify still credits (D13) |
 | Cleanup | hourly | idempotency keys (7 d), published outbox (3 d), inbox ids (7 d), inbound events (30 d) |
-| Invariants | every 5 min | `operations.InvariantsService.check()`; logs an alert on any violation |
+| Invariants | **not scheduled** | Planned every 5 min with an alert; only the on-demand `GET /internal/invariants` was built. Listed as a known gap in `overview.md` |
 
 The sweeper publishes directly to RabbitMQ rather than through the outbox. Its work is re-derivable from rows: if a publish fails, or RabbitMQ restarts and loses the queue, the row is due again after the bump and the next sweep queues it (tested by dropping the connection and purging the queue, and with a real `docker compose restart rabbitmq` in `npm run test:chaos`).
 

@@ -1,0 +1,15 @@
+{"mode":"default","ts":"2026-11-06T10:34:18.123Z","req":"POST /psp/payments","reqBody":{"amount":5500},"status":400,"resBody":{"code":-12,"message":"amount below minimum"}}
+{"mode":"default","ts":"2026-11-06T10:34:18.128Z","req":"POST /psp/payments","reqBody":{"amount":7750},"status":400,"resBody":{"code":-12,"message":"amount below minimum"}}
+{"mode":"default","ts":"2026-11-06T10:34:18.130Z","req":"POST /psp/payments","reqBody":{"amount":8875},"status":400,"resBody":{"code":-12,"message":"amount below minimum"}}
+{"mode":"default","ts":"2026-11-06T10:34:18.132Z","req":"POST /psp/payments","reqBody":{"amount":9438},"status":400,"resBody":{"code":-12,"message":"amount below minimum"}}
+{"mode":"default","ts":"2026-11-06T10:34:18.134Z","req":"POST /psp/payments","reqBody":{"amount":9719},"status":400,"resBody":{"code":-12,"message":"amount below minimum"}}
+{"mode":"default","ts":"2026-11-06T10:34:18.136Z","req":"POST /psp/payments","reqBody":{"amount":9860},"status":400,"resBody":{"code":-12,"message":"amount below minimum"}}
+{"mode":"default","ts":"2026-11-06T10:34:18.138Z","req":"POST /psp/payments","reqBody":{"amount":9930},"status":400,"resBody":{"code":-12,"message":"amount below minimum"}}
+{"mode":"default","ts":"2026-11-06T10:34:18.140Z","req":"POST /psp/payments","reqBody":{"amount":9965},"status":400,"resBody":{"code":-12,"message":"amount below minimum"}}
+{"mode":"default","ts":"2026-11-06T10:34:18.142Z","req":"POST /psp/payments","reqBody":{"amount":9983},"status":400,"resBody":{"code":-12,"message":"amount below minimum"}}
+{"mode":"default","ts":"2026-11-06T10:34:18.144Z","req":"POST /psp/payments","reqBody":{"amount":9992},"status":400,"resBody":{"code":-12,"message":"amount below minimum"}}
+{"mode":"default","ts":"2026-11-06T10:34:18.146Z","req":"POST /psp/payments","reqBody":{"amount":9996},"status":400,"resBody":{"code":-12,"message":"amount below minimum"}}
+{"mode":"default","ts":"2026-11-06T10:34:18.147Z","req":"POST /psp/payments","reqBody":{"amount":9998},"status":400,"resBody":{"code":-12,"message":"amount below minimum"}}
+{"mode":"default","ts":"2026-11-06T10:34:18.149Z","req":"POST /psp/payments","reqBody":{"amount":9999},"status":400,"resBody":{"code":-12,"message":"amount below minimum"}}
+{"mode":"default","ts":"2026-11-06T10:34:18.149Z","probe":"PSP-02","result":"smallest accepted amount (rial)","value":10000}
+{"mode":"default","ts":"2026-11-06T10:41:52.031Z","req":"POST /psp/payments","reqBody":{"amount":10000},"status":201,"resBody":{"code":100,"token":"A09e43ba4c0ebd0adf","paymentUrl":"http://simulator:8080/psp/pay/A09e43ba4c0ebd0adf"}}

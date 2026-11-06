@@ -1,0 +1,2 @@
+{"mode": "hostile", "ts": "2026-11-02T10:49:41.338Z", "req": "POST /psp/verify", "reqBody": "{\"token\":\"A0cf1b3e8c97da453b\"}", "status": 503, "latencyMs": 2, "resBody": "{\"code\":-1,\"message\":\"service unavailable\"}"}
+{"mode": "hostile", "ts": "2026-11-02T10:49:41.340Z", "req": "POST /psp/verify", "reqBody": "{\"token\":\"A0cf1b3e8c97da453b\"}", "status": 200, "latencyMs": 3, "resBody": "{\"code\":100,\"status\":\"OK\",\"amount\":\"1000000\",\"refId\":\"5407138746\"}"}

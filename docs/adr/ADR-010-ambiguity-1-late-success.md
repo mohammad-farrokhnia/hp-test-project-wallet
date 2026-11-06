@@ -32,6 +32,6 @@ Transition W12 books a `WITHDRAWAL_LATE_SUCCESS` journal: PAYOUT_CLEARING +x, AV
 
 **Cost**
 
-- One case where a final status changes; audited in `state_transitions` and flagged.
+- One case where a final status changes. It is visible through `late_success_at`, the `LATE_SUCCESS` review flag, an alert in the log, and the `WITHDRAWAL_LATE_SUCCESS` journal that references the withdrawal.
 - A human must follow up with the customer.
 

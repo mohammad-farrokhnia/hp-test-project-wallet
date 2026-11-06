@@ -120,7 +120,7 @@ erDiagram
     }
 ```
 
-Not drawn, because nothing references them: `outbox`, `inbox`, `notifications`, `inbound_events`, `state_transitions`.
+Not drawn, because nothing references them: `outbox`, `inbox`, `notifications`, `inbound_events`.
 
 ## Ledger tables (owned by the ledger module)
 
@@ -390,38 +390,25 @@ Every PSP callback and payout webhook exactly as received, rejected ones include
 - `INDEX (reference, received_at)`, `INDEX (received_at)`. Retention 30 days.
 - `CHECK`: a payout webhook always has `signature_valid`; `REJECTED_SIGNATURE` only with `signature_valid = false`.
 
-### `state_transitions` (shared, append-only)
-One row per status change of a deposit or withdrawal, so "what happened to this withdrawal?" is one query.
-
-| Column | Type | Notes |
-|---|---|---|
-| id | bigint identity | PK |
-| entity_type | text | `DEPOSIT` \| `WITHDRAWAL` |
-| entity_id | uuid | |
-| from_status, to_status | text | `from_status` null on creation; equal values for flag-only events (return, review) |
-| event | text | e.g. `PROVIDER_ACCEPTED`, `RETURNED`, `MARKED_FOR_REVIEW` |
-| cause | text | `API`, `SUBMIT`, `WEBHOOK`, `CALLBACK`, `POLL`, `SWEEPER`, `OPS` |
-| detail | jsonb | provider snapshot, attempt number |
-| created_at | timestamptz | |
-
-- `INDEX (entity_id, id)`. Trigger rejects `UPDATE` and `DELETE`.
+### `state_transitions`: designed, not built
+The v1 design had an append-only table with one row per status change. I did not build it. The history of a withdrawal is reconstructed from its journals (each references the withdrawal), `payout_attempts` (every provider call and its outcome), `inbound_events` (every webhook as received) and its own timestamp columns (`submitted_at`, `completed_at`, `returned_at`, `late_success_at`). Adding the table is one migration and one insert beside each compare-and-set status update.
 
 ## Database functions and triggers
 
 | Name | On | Does |
 |---|---|---|
-| `reject_mutation()` | `BEFORE UPDATE OR DELETE` on journals, postings, state_transitions | Raises: history is append-only |
+| `reject_mutation()` | `BEFORE UPDATE OR DELETE` on journals, postings | Raises: history is append-only |
 | `check_journal_balanced()` | `CONSTRAINT TRIGGER AFTER INSERT ON postings DEFERRABLE INITIALLY DEFERRED` | Sum = 0, one currency, matches the journal and the account |
 | `check_journal_has_postings()` | `CONSTRAINT TRIGGER AFTER INSERT ON journals DEFERRABLE INITIALLY DEFERRED` | At least two postings exist at commit |
 | `touch_updated_at()` | `BEFORE UPDATE` on mutable tables | Sets `updated_at` |
 
-**Roles (cheap defence in depth).** Migrations run as the owner. The app connects as `t103_app`, which has `SELECT, INSERT` only on journals, postings and state_transitions. A bug, or a hand-typed SQL statement through the app, cannot rewrite history.
+**Roles.** The v1 design had the app connect as a restricted role with `SELECT, INSERT` only on journals and postings. It was not built: the app connects as the database owner. The `reject_mutation()` triggers still refuse any `UPDATE` or `DELETE` on journals and postings, whoever sends it; a restricted role would add protection against `DROP` and `TRUNCATE` and is the first hardening step for production.
 
 ## Retention
 
 | Table | Kept |
 |---|---|
-| journals, postings, deposits, withdrawals, payout_attempts, adjustments, transfers, state_transitions | Forever (financial records) |
+| journals, postings, deposits, withdrawals, payout_attempts, adjustments, transfers | Forever (financial records) |
 | idempotency_keys | 7 days (business uniqueness lives in the tables above) |
 | outbox (published) | 3 days |
 | inbound_events | 30 days |

@@ -33,7 +33,7 @@ Modular monolith (NestJS) on one PostgreSQL. One image, two roles: **`api`** (HT
 | payout_attempts | PK (withdrawal_id, attempt_no) · outcome ACCEPTED / REPLAYED / REJECTED / AMBIGUOUS · raw response |
 | withdrawal_daily_usage | PK (user_id, day) · CHECK 0 ≤ used_rial ≤ cap_rial |
 | adjustments | amount > 0 · reason NOT NULL · actor · journal_id |
-| outbox · inbox · state_transitions | outbox partial INDEX WHERE published_at IS NULL · inbox PK (consumer, message_id) · append-only status history |
+| outbox · inbox | outbox partial INDEX WHERE published_at IS NULL · inbox PK (consumer, message_id) |
 | inbound_events | every callback/webhook as received (raw body, signature result), rejected ones too |
 
 ## 4. The request path is one transaction
@@ -121,4 +121,11 @@ There are 13 ADRs in `adr/`. These four shape everything else.
 | 4 | Which money unit? | NUMERIC + decimal library · integer toman · integer rial | **Integer rial**: matches both providers and can't lose a rial | ×10 conversion at the API edge |
 
 ## Changelog
-- **v1** (2026-11-03): initial design, informed by the black-box simulator probe 
+- **v1** (2026-11-03): initial design, informed by the black-box simulator probe.
+- **v1.1** (2026-11-04): Kysely added as a typed query builder over TypeORM's transactions (ADR-013).
+- **v1.2** (2026-11-06): USDT counts toward the daily cap at a reference rate snapshotted on each withdrawal (ADR-012, Ambiguity #2). Cancel allowed only while `PENDING` (Ambiguity #3).
+- **v2** (2026-11-06), after building and running against the hostile simulator:
+  - Withdrawal: a GET 404 for a transfer the provider already accepted is not a failure (PAY-14); it is rechecked and flagged `UNKNOWN_AFTER_SUCCESS` only after 30 min (W16–W19). A 200 replay whose fields differ from ours is flagged `REPLAY_MISMATCH` and stays frozen.
+  - Deposit: a `CREATED` deposit whose PSP call never completed fails as `CREATE_ABANDONED` after 10 min; a verified bank reference already credited to another deposit is flagged `DUPLICATE_REF` and not credited twice.
+  - Not built from v1: the `state_transitions` audit table, the restricted database role and the scheduled invariant check. History is reconstructed from journals, `payout_attempts` and `inbound_events`; `GET /internal/invariants` runs on demand.
+  - New documents: `overview.md`, `ambiguities.md`, `incident-analysis.md`, `scalability.md`, `running.md`, `api/openapi.yaml`, and provider notes v2 with three questions answered.

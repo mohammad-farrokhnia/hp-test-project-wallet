@@ -1,0 +1,3 @@
+{"mode": "default", "ts": "2026-11-02T10:48:10.506Z", "req": "POST /psp/pay/A0497dee4be188fb5c", "reqBody": "{\"result\":\"success\"}", "status": 200, "latencyMs": 24, "resBody": "{\"code\":100,\"status\":\"PAID\"}"}
+{"mode": "default", "ts": "2026-11-02T10:48:30.625Z", "req": "POST /psp/verify", "reqBody": "{\"token\":\"A0497dee4be188fb5c\"}", "status": 200, "latencyMs": 7, "resBody": "{\"code\":100,\"status\":\"OK\",\"amount\":\"1000000\",\"refId\":\"8039271306\"}"}
+{"note": "no callback was ever received for orderId of this token (A0497dee4be188fb5c) during the 9.5-minute run"}

@@ -1,0 +1,1610 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "T-103 Wallet & Ledger Service",
+    "version": "1.0.0",
+    "description": "Wallet, deposit, withdrawal, transfer and operations API of the T-103 service.\n\nConventions\n- Request and response bodies are JSON. Every amount is a **string**: IRT is whole toman, USDT has up to 6 decimal places.\n  A JSON number in an amount field is refused with 400 `VALIDATION_ERROR`.\n- Every financial `POST` requires an `Idempotency-Key` header (1–255 printable ASCII characters). The provider webhooks and\n  `POST /reconciliation/run` are exempt. A repeated request with the same key and body returns the stored response with the\n  header `Idempotent-Replayed: true`; the same key with another body is 422 `IDEMPOTENCY_KEY_REUSED`.\n- Every error is `{\"code\": \"...\", \"message\": \"...\"}`. Every response carries `X-Request-Id`.\n- `/internal/*` and `/reconciliation/*` require `X-Internal-Api-Key` when the service is started with `INTERNAL_API_KEY` set.\n  With it empty (the compose default) they are open, and nginx is published on 127.0.0.1 only.\n\nAnnex A contract endpoints are tagged `contract`. Fields beyond the contract are additive.\n"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3000",
+      "description": "docker compose (nginx in front of two API replicas)"
+    }
+  ],
+  "tags": [
+    {
+      "name": "contract",
+      "description": "Endpoints defined in Annex A of the brief"
+    },
+    {
+      "name": "wallet"
+    },
+    {
+      "name": "deposits"
+    },
+    {
+      "name": "withdrawals"
+    },
+    {
+      "name": "transfers"
+    },
+    {
+      "name": "operations"
+    },
+    {
+      "name": "provider-webhooks",
+      "description": "Called by the PSP and the payout provider, not by clients"
+    },
+    {
+      "name": "health"
+    }
+  ],
+  "paths": {
+    "/deposits": {
+      "post": {
+        "tags": [
+          "contract",
+          "deposits"
+        ],
+        "summary": "Create an IRT deposit and get the PSP payment link",
+        "description": "Two phases: the deposit row is committed first, then the PSP is called outside any transaction, then the outcome is recorded.\nIf the PSP rejects the payment the deposit is created as `FAILED` and the answer is still 201 with `paymentUrl: null`.\nIf the PSP is unavailable the answer is 503 `PROVIDER_UNAVAILABLE` (not stored): retry with the same key and the same\ndeposit is resumed.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDepositRequest"
+              },
+              "example": {
+                "userId": "alice",
+                "amount": "250000"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created (or replayed)",
+            "headers": {
+              "Idempotent-Replayed": {
+                "$ref": "#/components/headers/IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateDepositResponse"
+                },
+                "example": {
+                  "depositId": "01933b1e-7c1a-7d3e-9c2b-5d7c1f0a9e11",
+                  "status": "PENDING",
+                  "paymentUrl": "http://simulator:8080/psp/pay/4f7c..."
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/InProgress"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/deposits/{id}": {
+      "get": {
+        "tags": [
+          "contract",
+          "deposits"
+        ],
+        "summary": "Get a deposit",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ResourceId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The deposit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Deposit"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/withdrawals": {
+      "post": {
+        "tags": [
+          "contract",
+          "withdrawals"
+        ],
+        "summary": "Request a withdrawal (IRT to a Sheba IBAN, USDT to a TRC20 address)",
+        "description": "One database transaction: the amount (plus the 1 USDT fee for USDT) moves from available to frozen, the daily limit is\nreserved, and a submit job is written to the outbox. The provider is called later by a worker.\n\nError precedence: 400 `INVALID_DESTINATION`, 422 `BELOW_MINIMUM` (both not stored), then inside the transaction\n422 `INSUFFICIENT_FUNDS` and 422 `DAILY_LIMIT_EXCEEDED` (stored, so a repeat with the same key gets the same answer).\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWithdrawalRequest"
+              },
+              "examples": {
+                "irt": {
+                  "value": {
+                    "userId": "alice",
+                    "currency": "IRT",
+                    "amount": "150000",
+                    "destination": "IR820540102680020817909002"
+                  }
+                },
+                "usdt": {
+                  "value": {
+                    "userId": "alice",
+                    "currency": "USDT",
+                    "amount": "10.5",
+                    "destination": "TQrY8tryqsYVCYS3MFbtffiPp2ccyn4STm"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Accepted (or replayed)",
+            "headers": {
+              "Idempotent-Replayed": {
+                "$ref": "#/components/headers/IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateWithdrawalResponse"
+                },
+                "example": {
+                  "withdrawalId": "01933b1f-02aa-7c55-8d1e-2a6b0c3d4e5f",
+                  "status": "PENDING"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/InProgress"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/withdrawals/{id}": {
+      "get": {
+        "tags": [
+          "contract",
+          "withdrawals"
+        ],
+        "summary": "Get a withdrawal",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ResourceId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The withdrawal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Withdrawal"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/withdrawals/{id}/cancel": {
+      "post": {
+        "tags": [
+          "withdrawals"
+        ],
+        "summary": "Cancel a withdrawal that is still PENDING (Ambiguity 3)",
+        "description": "Allowed only while the withdrawal is `PENDING`. It becomes `FAILED` with `failureReason: CANCELLED`, the frozen amount and\nfee return to available, and the daily-limit share is released. From `SUBMITTING` onwards the answer is 409\n`CANCEL_NOT_ALLOWED`, because the provider may already hold the transfer.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ResourceId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancelled (or already cancelled)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Withdrawal"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          }
+        }
+      }
+    },
+    "/wallets/{userId}": {
+      "get": {
+        "tags": [
+          "contract",
+          "wallet"
+        ],
+        "summary": "Balances of a user in every currency",
+        "description": "An unknown user gets zero balances; the call never creates a wallet.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/UserId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Balances",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Wallet"
+                },
+                "example": {
+                  "userId": "alice",
+                  "balances": [
+                    {
+                      "currency": "IRT",
+                      "available": "350000",
+                      "frozen": "150000",
+                      "total": "500000",
+                      "debt": "0"
+                    },
+                    {
+                      "currency": "USDT",
+                      "available": "0",
+                      "frozen": "0",
+                      "total": "0",
+                      "debt": "0"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        }
+      }
+    },
+    "/wallets/{userId}/ledger": {
+      "get": {
+        "tags": [
+          "contract",
+          "wallet"
+        ],
+        "summary": "Ledger history of a user, newest first",
+        "description": "Keyset pagination. Pass `nextCursor` from one page as `cursor` for the next; `null` means there are no more.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/UserId"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "default": "20"
+            },
+            "description": "1 to 100"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LedgerPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        }
+      }
+    },
+    "/transfers": {
+      "post": {
+        "tags": [
+          "contract",
+          "transfers"
+        ],
+        "summary": "Move IRT or USDT from one user to another (bonus)",
+        "description": "One transaction and one TRANSFER journal; the receiver's debt, if any, is paid off first.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTransferRequest"
+              },
+              "example": {
+                "fromUserId": "alice",
+                "toUserId": "bob",
+                "currency": "IRT",
+                "amount": "50000"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Done (or replayed)",
+            "headers": {
+              "Idempotent-Replayed": {
+                "$ref": "#/components/headers/IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "transferId"
+                  ],
+                  "properties": {
+                    "transferId": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/InProgress"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/internal/adjustments": {
+      "post": {
+        "tags": [
+          "contract",
+          "operations"
+        ],
+        "summary": "Manual credit by the operations team",
+        "description": "Books an `ADJUSTMENT_CREDIT` journal from the `OPS_ADJUSTMENTS` system account. A reason is mandatory.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/InternalApiKey"
+          },
+          {
+            "name": "X-Operator-Id",
+            "in": "header",
+            "required": false,
+            "description": "Who made the adjustment, stored as the actor (1–128 printable ASCII characters)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAdjustmentRequest"
+              },
+              "example": {
+                "userId": "alice",
+                "currency": "IRT",
+                "amount": "500000",
+                "reason": "Compensation for ticket 4812"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Credited (or replayed)",
+            "headers": {
+              "Idempotent-Replayed": {
+                "$ref": "#/components/headers/IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Adjustment"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "$ref": "#/components/responses/InProgress"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          }
+        }
+      }
+    },
+    "/internal/invariants": {
+      "get": {
+        "tags": [
+          "operations"
+        ],
+        "summary": "Check the books",
+        "description": "Runs every ledger invariant in one read-only snapshot: each journal sums to zero, each balance equals the sum of its\npostings, no user balance is negative, AVAILABLE is zero whenever DEBT is not, and FROZEN equals the open withdrawals.\nAlways 200; `ok` says whether every check passed. At most 100 violations are listed per check.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/InternalApiKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The report",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvariantsReport"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/reconciliation/run": {
+      "post": {
+        "tags": [
+          "contract",
+          "operations"
+        ],
+        "summary": "Reconcile one day's PSP settlement file with our deposits (bonus)",
+        "description": "Downloads the settlement CSV for the Tehran day, matches rows to our credited deposits by bank reference, stores the run\nand returns every mismatch. It changes nothing else. No Idempotency-Key: repeating it makes another report, never a\nsecond effect. Amounts in a run are rial, as the PSP file and the ledger hold them.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/InternalApiKey"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "date": {
+                    "type": "string",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                    "description": "Tehran calendar day; today when omitted"
+                  }
+                }
+              },
+              "example": {
+                "date": "2026-11-06"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconciliationRun"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/reconciliation/runs/{id}": {
+      "get": {
+        "tags": [
+          "operations"
+        ],
+        "summary": "Read a stored reconciliation run",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ResourceId"
+          },
+          {
+            "$ref": "#/components/parameters/InternalApiKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconciliationRun"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/webhooks/psp/callback/{depositId}": {
+      "post": {
+        "tags": [
+          "provider-webhooks"
+        ],
+        "summary": "PSP payment callback (unsigned; a hint only)",
+        "description": "Stored as received and used only to schedule a status lookup. It never changes a balance or a status: the PSP callback is\nunsigned, sometimes missing, duplicated, says NOK for paid payments and can carry a forged amount (PSP-04 to PSP-07).\nAlways answers 200 quickly, because the PSP does not retry a failure.\n",
+        "parameters": [
+          {
+            "name": "depositId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string"
+                  },
+                  "orderId": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "OK",
+                      "NOK"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Received",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Received"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhooks/payout": {
+      "post": {
+        "tags": [
+          "provider-webhooks"
+        ],
+        "summary": "Payout status webhook (HMAC-signed; triggers a lookup)",
+        "description": "`X-Signature` must be hex HMAC-SHA256 of the raw body with the shared secret, compared in constant time. A bad or missing\nsignature is 401 and is recorded. A valid one is recorded and schedules a `GET` of the transfer; the webhook itself never\nmoves money (PAY-09 to PAY-12).\n",
+        "parameters": [
+          {
+            "name": "X-Signature",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "event": {
+                    "type": "string",
+                    "example": "transfer.updated"
+                  },
+                  "eventId": {
+                    "type": "string"
+                  },
+                  "requestId": {
+                    "type": "string"
+                  },
+                  "trackingId": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "amount": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string"
+                  },
+                  "occurredAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Received",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Received"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Liveness",
+        "responses": {
+          "200": {
+            "description": "The process answers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "const": "ok"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Readiness (the database answers)",
+        "responses": {
+          "200": {
+            "description": "Ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "const": "ok"
+                    },
+                    "checks": {
+                      "type": "object",
+                      "properties": {
+                        "database": {
+                          "type": "string",
+                          "const": "up"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "description": "1–255 printable ASCII characters. Missing → 400 `IDEMPOTENCY_KEY_REQUIRED`.",
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        }
+      },
+      "InternalApiKey": {
+        "name": "X-Internal-Api-Key",
+        "in": "header",
+        "required": false,
+        "description": "Required only when the service runs with `INTERNAL_API_KEY` set.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "UserId": {
+        "name": "userId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/UserId"
+        }
+      },
+      "ResourceId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "description": "A UUID. A malformed id is 404, like an unknown one.",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      }
+    },
+    "headers": {
+      "IdempotentReplayed": {
+        "description": "`true` when the body is the stored response of an earlier request with the same key",
+        "schema": {
+          "type": "string",
+          "enum": [
+            "true"
+          ]
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "`VALIDATION_ERROR`, `IDEMPOTENCY_KEY_REQUIRED`, `INVALID_DESTINATION`, `INVALID_CURSOR`",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "code": "INVALID_DESTINATION",
+              "message": "Invalid destination"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "`UNAUTHORIZED` (internal key) or `INVALID_SIGNATURE` (payout webhook)",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "`NOT_FOUND`",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "InProgress": {
+        "description": "`IDEMPOTENCY_IN_PROGRESS`: another request with this key is still running",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "`CANCEL_NOT_ALLOWED` or `IDEMPOTENCY_IN_PROGRESS`",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Unprocessable": {
+        "description": "`INSUFFICIENT_FUNDS`, `DAILY_LIMIT_EXCEEDED`, `BELOW_MINIMUM`, `IDEMPOTENCY_KEY_REUSED`, `SAME_USER`",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "code": "INSUFFICIENT_FUNDS",
+              "message": "Insufficient funds"
+            }
+          }
+        }
+      },
+      "Unavailable": {
+        "description": "`SERVICE_BUSY` (lock wait exceeded; retry with the same key), `PROVIDER_UNAVAILABLE`, `NOT_READY`",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "VALIDATION_ERROR",
+              "IDEMPOTENCY_KEY_REQUIRED",
+              "INVALID_DESTINATION",
+              "INVALID_CURSOR",
+              "UNAUTHORIZED",
+              "INVALID_SIGNATURE",
+              "NOT_FOUND",
+              "IDEMPOTENCY_IN_PROGRESS",
+              "CANCEL_NOT_ALLOWED",
+              "BELOW_MINIMUM",
+              "INSUFFICIENT_FUNDS",
+              "DAILY_LIMIT_EXCEEDED",
+              "IDEMPOTENCY_KEY_REUSED",
+              "SAME_USER",
+              "INTERNAL_ERROR",
+              "SERVICE_BUSY",
+              "NOT_READY",
+              "PROVIDER_UNAVAILABLE"
+            ]
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "UserId": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_-]{1,64}$"
+      },
+      "Currency": {
+        "type": "string",
+        "enum": [
+          "IRT",
+          "USDT"
+        ]
+      },
+      "Amount": {
+        "type": "string",
+        "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+        "description": "IRT in whole toman; USDT with up to 6 decimal places. A string, never a JSON number."
+      },
+      "CreateDepositRequest": {
+        "type": "object",
+        "required": [
+          "userId",
+          "amount"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "userId": {
+            "$ref": "#/components/schemas/UserId"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Amount",
+            "description": "Toman; minimum 1,000"
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "IRT"
+            ],
+            "description": "Optional; deposits are IRT only"
+          }
+        }
+      },
+      "CreateDepositResponse": {
+        "type": "object",
+        "required": [
+          "depositId",
+          "status",
+          "paymentUrl"
+        ],
+        "properties": {
+          "depositId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "FAILED"
+            ]
+          },
+          "paymentUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Deposit": {
+        "type": "object",
+        "required": [
+          "depositId",
+          "status"
+        ],
+        "properties": {
+          "depositId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "CREATED",
+              "PENDING",
+              "SUCCEEDED",
+              "FAILED"
+            ]
+          },
+          "userId": {
+            "$ref": "#/components/schemas/UserId"
+          },
+          "currency": {
+            "type": "string",
+            "const": "IRT"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Amount"
+          },
+          "creditedAmount": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The verified amount credited",
+            "in toman": null
+          },
+          "paymentUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "failureReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "PSP_REJECTED",
+              "CREATE_ABANDONED",
+              "EXPIRED",
+              "PSP_FAILED",
+              "PSP_REVERSED",
+              null
+            ]
+          },
+          "needsReview": {
+            "type": "boolean"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CreateWithdrawalRequest": {
+        "type": "object",
+        "required": [
+          "userId",
+          "currency",
+          "amount",
+          "destination"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "userId": {
+            "$ref": "#/components/schemas/UserId"
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Amount",
+            "description": "What the destination receives. Minimum 100,000 toman or 10 USDT. USDT also costs a 1 USDT fee."
+          },
+          "destination": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "IRT: Sheba IBAN (IR + 24 digits, mod-97; spaces and lowercase accepted). USDT: TRC20 address (base58check)."
+          }
+        }
+      },
+      "CreateWithdrawalResponse": {
+        "type": "object",
+        "required": [
+          "withdrawalId",
+          "status"
+        ],
+        "properties": {
+          "withdrawalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "const": "PENDING"
+          }
+        }
+      },
+      "Withdrawal": {
+        "type": "object",
+        "required": [
+          "withdrawalId",
+          "status"
+        ],
+        "properties": {
+          "withdrawalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "SUBMITTING",
+              "PROCESSING",
+              "SUCCEEDED",
+              "FAILED"
+            ]
+          },
+          "userId": {
+            "$ref": "#/components/schemas/UserId"
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Amount"
+          },
+          "fee": {
+            "$ref": "#/components/schemas/Amount"
+          },
+          "destination": {
+            "type": "string",
+            "description": "Masked"
+          },
+          "failureReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "PROVIDER_REJECTED",
+              "PROVIDER_FAILED",
+              "CANCELLED",
+              null
+            ]
+          },
+          "returnedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Set when the bank returned a paid transfer"
+          },
+          "returnReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "needsReview": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Balance": {
+        "type": "object",
+        "required": [
+          "currency",
+          "available"
+        ],
+        "properties": {
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "available": {
+            "$ref": "#/components/schemas/Amount",
+            "description": "What the user can withdraw or transfer now"
+          },
+          "frozen": {
+            "$ref": "#/components/schemas/Amount",
+            "description": "Held by open withdrawals (amount + fee)"
+          },
+          "total": {
+            "$ref": "#/components/schemas/Amount",
+            "description": "available + frozen"
+          },
+          "debt": {
+            "$ref": "#/components/schemas/Amount",
+            "description": "Owed after a late success (Ambiguity 1); paid off by the next credits"
+          }
+        }
+      },
+      "Wallet": {
+        "type": "object",
+        "required": [
+          "userId",
+          "balances"
+        ],
+        "properties": {
+          "userId": {
+            "$ref": "#/components/schemas/UserId"
+          },
+          "balances": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Balance"
+            }
+          }
+        }
+      },
+      "LedgerItem": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Posting id"
+          },
+          "journalId": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "DEPOSIT_CREDIT",
+              "ADJUSTMENT_CREDIT",
+              "WITHDRAWAL_FREEZE",
+              "WITHDRAWAL_SETTLE",
+              "WITHDRAWAL_RELEASE",
+              "WITHDRAWAL_RETURN",
+              "WITHDRAWAL_LATE_SUCCESS",
+              "TRANSFER"
+            ]
+          },
+          "bucket": {
+            "type": "string",
+            "enum": [
+              "AVAILABLE",
+              "FROZEN",
+              "DEBT"
+            ]
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "amount": {
+            "type": "string",
+            "description": "Signed"
+          },
+          "balanceAfter": {
+            "type": "string"
+          },
+          "reference": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "DEPOSIT",
+                  "WITHDRAWAL",
+                  "ADJUSTMENT",
+                  "TRANSFER"
+                ]
+              },
+              "id": {
+                "type": "string"
+              }
+            }
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "LedgerPage": {
+        "type": "object",
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LedgerItem"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "CreateTransferRequest": {
+        "type": "object",
+        "required": [
+          "fromUserId",
+          "toUserId",
+          "currency",
+          "amount"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "fromUserId": {
+            "$ref": "#/components/schemas/UserId"
+          },
+          "toUserId": {
+            "$ref": "#/components/schemas/UserId"
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Amount"
+          }
+        }
+      },
+      "CreateAdjustmentRequest": {
+        "type": "object",
+        "required": [
+          "userId",
+          "currency",
+          "amount",
+          "reason"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "userId": {
+            "$ref": "#/components/schemas/UserId"
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Amount",
+            "description": "Greater than zero"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 500
+          }
+        }
+      },
+      "Adjustment": {
+        "type": "object",
+        "properties": {
+          "adjustmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "journalId": {
+            "type": "string"
+          },
+          "userId": {
+            "$ref": "#/components/schemas/UserId"
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Amount"
+          }
+        }
+      },
+      "InvariantsReport": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "checkedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "enum": [
+                    "ZERO_SUM",
+                    "BALANCE_EQUALS_POSTINGS",
+                    "NO_NEGATIVE_BALANCES",
+                    "AVAILABLE_ONLY_WITHOUT_DEBT",
+                    "FROZEN_EQUALS_OPEN_WITHDRAWALS"
+                  ]
+                },
+                "ok": {
+                  "type": "boolean"
+                },
+                "violations": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                },
+                "truncated": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      },
+      "ReconciliationRun": {
+        "type": "object",
+        "required": [
+          "date",
+          "mismatches"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "date": {
+            "type": "string",
+            "description": "YYYY-MM-DD"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finishedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "settlementRows": {
+            "type": "integer"
+          },
+          "matched": {
+            "type": "integer"
+          },
+          "mismatchCount": {
+            "type": "integer"
+          },
+          "mismatches": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "type",
+                "reference"
+              ],
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "MISSING_IN_LEDGER",
+                    "MISSING_IN_SETTLEMENT",
+                    "AMOUNT_MISMATCH",
+                    "DUPLICATE_IN_SETTLEMENT",
+                    "UNREADABLE_ROW"
+                  ]
+                },
+                "reference": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Bank reference without padding"
+                },
+                "depositId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "ourAmountRial": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "theirAmountRial": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "details": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Received": {
+        "type": "object",
+        "properties": {
+          "received": {
+            "type": "boolean",
+            "const": true
+          }
+        }
+      }
+    }
+  }
+}
